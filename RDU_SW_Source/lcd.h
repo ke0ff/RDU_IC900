@@ -46,6 +46,9 @@
 #define	REV_FLAG		0x01		// reverse mode enabled
 #define	REV_SQU_FLAG	0x02		// check mode enabled
 
+// smute flags
+#define	MS_MUTE			0x01		// both bands band mute
+#define	SUB_MUTE		0x02		// sub band mute
 
 // freq display Fn error flags
 #define	NO_UX_PRSNT	1
@@ -111,6 +114,7 @@
 #define	MSRF012_ADDR	0x08
 #define	M00			0x2
 #define	M00_ADDR	0x09
+#define	M0_ADDR		0x0a
 
 #define	AOW			0x1
 #define	AOW_ADDR		0x1d
