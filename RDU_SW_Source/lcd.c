@@ -48,12 +48,20 @@ U8	lcd_sfreq_1[] = { 0x83, 0xe7, OR_DMEM, WITH_DECODE };					// set pointer, "5"
 U8	lcd_sfreq_2[] = { 0x81, 0xd4 };											// SDP
 U8	lcd_sfreq_3[] = { 0x81, 0xd0 };											// no MDP
 U8	lcd_sraw[] = { CS2_MASK | 3, LOAD_PTR | 7, OR_DMEM, WITHOUT_DECODE };	// set pointer, "5"00 hz = no change, WITHOUT seg decoder
-U8	lcd_qv_lsd[5][3] = {													// list of 5 7-seg ordinal patterns
+/*U8	lcd_qv_lsd[5][3] = {													// list of 5 7-seg ordinal patterns
 					 { 0, 0, 0 },											// [ordinal][seg addr]
 					 { 0, 4, 0 },
 					 { 0, 6, 0 },
 					 { 0, 7, 0 },
 					 { 2, 7, 2 }
+};*/
+U8	lcd_qv_lsd[5][3] = {													// list of 5 7-seg ordinal patterns
+					// [ordinal][seg addr]
+					{ 0, 4, 0 },
+					{ 0, 6, 0 },
+					{ 0, 6, 1 },
+					{ 0, 7, 1 },
+					{ 1, 7, 1 }
 };
 
 U16	tone_list[] = {  670,  719,  744,  770,  797,  825,  854,  885,
@@ -1173,9 +1181,9 @@ void msmet(U8 srf, U8 blink){
 			lcd_buf[3] = WR_DMEM | lcd_qv_lsd[4][1];
 			lcd_buf[4] = WR_DMEM | lcd_qv_lsd[4][2];
 			lcd_buf[5] = LOAD_PTR | MMEM_ADDR;
-			lcd_buf[6] = WR_BMEM | 2;					// and make it flash
+			lcd_buf[6] = WR_BMEM | 3;					// and make it flash
 			lcd_buf[7] = WR_BMEM | 7;
-			lcd_buf[8] = WR_BMEM | 2;
+			lcd_buf[8] = WR_BMEM | 3;
 		}else{
 			lcd_buf[0] = CS1_MASK | 10;					// set CS1 with 8 bytes to send
 			lcd_buf[1] = LOAD_PTR | MMEM_ADDR;
@@ -1247,9 +1255,9 @@ void ssmet(U8 srf, U8 blink){
 			lcd_buf[3] = WR_DMEM | lcd_qv_lsd[4][1];
 			lcd_buf[4] = WR_DMEM | lcd_qv_lsd[4][2];
 			lcd_buf[5] = LOAD_PTR | SMEM_ADDR;
-			lcd_buf[6] = WR_BMEM | 2;					// and make it flash
+			lcd_buf[6] = WR_BMEM | 3;					// and make it flash
 			lcd_buf[7] = WR_BMEM | 7;
-			lcd_buf[8] = WR_BMEM | 2;
+			lcd_buf[8] = WR_BMEM | 3;
 		}else{
 			lcd_buf[0] = CS2_MASK | 10;					// set CS1 with 8 bytes to send
 			lcd_buf[1] = LOAD_PTR | SMEM_ADDR;
