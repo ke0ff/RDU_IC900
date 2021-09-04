@@ -207,10 +207,13 @@
 // Port F defines
 // IC-900 SM defines the beep frequency as 1/525us = 1905 Hz.  However, tests indicate that 3375 Hz
 //	has a greater resonance and thus sounds much louder.
+#define	BEEP_DURATION	75L								// #ms for beep
+#define	BEEP_SHORT		20L								// #ms for beep
 #define	BEEP_FREQ		3375L							// 3.3KHz beep frequency
-#define	BEEP_COUNT		(BEEP_FREQ * 75L / 1000L)		// 0.075s beep pulse
+#define	BEEP_COUNT		(BEEP_FREQ * BEEP_DURATION / 1000L)		// 0.075s beep pulse
 #define	BEEP2_COUNT		(110)							// ~~2x beep pulse delay
-#define	DIAL_BEEP_COUNT	(BEEP_FREQ * 20L / 1000L)
+#define	DIAL_BEEP_COUNT	(BEEP_FREQ * BEEP_SHORT / 1000L)
+#define	BEEP_GAP		(BEEP_DURATION * 2)
 #define BEEP			0x01		// out		T0CCP0	{beeper}
 #define SOUT_TTL		0x02		// out		SSI1TX,	remote serial out (4800 baud, 32b)		(M1PWM5)
 #define LED_PWM			0x04		// out		M1PWM6	PBSW LED PWM
@@ -360,6 +363,9 @@ U32 free_run(void);
 void set_dial(S8 value);
 S8 get_dial(U8 tf);
 void do_dial_beep(void);
+void do_1beep(void);
+void do_2beep(void);
+void do_3beep(void);
 U8 sin_time(U8 cmd);
 U8 sout_time(U8 cmd);
 U8 mhz_time(U8 tf);
@@ -368,6 +374,10 @@ U8 q_time(U8 tf);
 U8 set_time(U8 tf);
 U8 offs_time(U8 tf);
 U8 sub_time(U8 tf);
+U8 mic_time(U8 tf);
+U8 micdb_time(U8 tf);
+U8 mute_time(U8 tf);
+U8 ts_time(U8 tf);
 
 void set_beep(U16 beep_frq, U16 b_count);
 void do_beep(U16 beep_cycles);

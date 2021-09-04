@@ -53,7 +53,7 @@
 #define SIN_SSRF_F		(SIN_SRFB >> 16)			// SRF sub
 #define SIN_SEND_F		SIN_SEND					// PTT
 #define SIN_DSQ_F		(SIN_DSQA|SIN_DSQB)			// tone detected
-#define SIN_MCK_F		(SIN_MCK|SIN_MUP)			// MIC u/d button change
+#define SIN_MCK_F		(SIN_MCK)					// MIC u/d button change
 #define SIN_SEL_F		(SIN_SEL11|SIN_SEL12|SIN_SEL21|SIN_SEL22)	// OPT
 #define	SIN_VFOM_F		0x00010000L					// vfo change flag
 #define	SIN_VFOS_F		0x00020000L					// vfo change flag
@@ -82,10 +82,22 @@
 //#define	VFO_SEL	1
 #define	CRC_HIB_ADDR	62		// CRC16 goes at top 2 bytes of HIB RAM
 
-#define	MHZ_TIME	SEC10		// MHZ digit mode timeout
-#define	VQ_TIME		SEC3		// vol/squ adj timeout
-#define	SET_TIME	(3*SEC10)	// set mode timeout
-#define	SUB_TIME	(3*SEC10)	// sub-focus timeout
+#define	MHZ_TIME		SEC10		// MHZ digit mode timeout
+#define	VQ_TIME			SEC3		// vol/squ adj timeout
+#define	SET_TIME		(3*SEC10)	// set mode timeout
+#define	SUB_TIME		(3*SEC10)	// sub-focus timeout
+#define	MIC_RPT_TIME	80			// mic u/d button 80ms repeat period
+#define	MIC_RPT_WAIT	1000		// mic u/d button repeat wait period
+#define	MIC_DB_TIME		20			// mic u/d button debounce wait period
+#define	MUTE_TIME		250			// volume mute delay for band swaps
+#define	TSW_TIME		SEC10		// TS adj timeout
+
+// set/read_tsab():
+#define	TSA_SEL			1			// selects TSA
+#define	TSB_SEL			2			// selects TSB
+#define	TS_5			1			// 5 KHz step
+#define	TS_10			2			// 10 KHz step
+#define	TS_25			5			// 25 KHz step
 
 //-----------------------------------------------------------------------------
 // Global Fns
@@ -137,3 +149,5 @@ void set_offs(U8 focus, U16 value);
 U16 get_offs(U8 focus);
 U8 inv_duplex(U8 focus);
 U8 inv_vfo(U8 focus);
+void mute_radio(U8 mutefl);
+U8 get_mute_radio(void);

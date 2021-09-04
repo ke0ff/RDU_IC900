@@ -28,7 +28,7 @@
 #define	SET_MODE		0x04	// set/config loop mode
 #define	MEM_MODE		0x08	// mem mode
 #define	VMODE_MASK		0xf0	// "normal" vfo display mode mask
-//#define	VMODE_VFODISP	0x10	// display vfo
+#define	VMODE_TSDISP	0x10	// display TS adj
 #define	VMODE_TDISP		0x20	// display PL tone
 #define	VMODE_ISTX		0x40	// tx mode
 #define	VMODE_ODISP		0x80	// display offset
@@ -208,4 +208,5 @@ U32 bcds_bin32(U8* sptr);
 void add_bcds(U8* sptr, S8 adder, U8 addr, U8 max, U8 min);
 void set_vfo_display(U8	sig);
 void rev_vfo(U8	focus);
-void  force_push(void);
+void force_push(void);
+U8 get_mutefl(void);

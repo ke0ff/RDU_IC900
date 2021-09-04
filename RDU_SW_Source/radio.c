@@ -65,16 +65,16 @@ U8	ux_present_flags;					// bitmapped "present" (AKA, "installed") flags.
 // these data structures are mirrored in a SW shadow NVRAM (HIB RAM)
 //	each band module has its own cluster of data for frq, offset, etc...
 //
-U32	vfo[ID1200];						// main vfo frequency (RX) in KHz
-U16	offs[ID1200];						// TX offset in KHz
+U32	vfo[NUM_VFOS];						// main vfo frequency (RX) in KHz
+U16	offs[NUM_VFOS];						// TX offset in KHz
 
-U8	dplx[ID1200];						// duplex/RFpwr/XIT/MEM - packed flags for each resource
-U8	ctcss[ID1200];						// PL setting and "OFF" control bit
-U8	tsa[ID1200];						// frq step "A" setting
-U8	tsb[ID1200];						// frq step "B" setting
-U8	sq[ID1200];							// SQ setting
-U8	vol[ID1200];						// VOL setting
-U8	mem[ID1200];						// mem# setting - an ASCII character that maps to an ordinal offset
+U8	dplx[NUM_VFOS];						// duplex/RFpwr/XIT/MEM - packed flags for each resource
+U8	ctcss[NUM_VFOS];						// PL setting and "OFF" control bit
+U8	tsa[NUM_VFOS];						// frq step "A" setting
+U8	tsb[NUM_VFOS];						// frq step "B" setting
+U8	sq[NUM_VFOS];							// SQ setting
+U8	vol[NUM_VFOS];						// VOL setting
+U8	mem[NUM_VFOS];						// mem# setting - an ASCII character that maps to an ordinal offset
 
 U8	ux129_xit;							// XIT setting (UX-129) - 4-bit signed nybble (+7/-8)
 U8	ux129_rit;							// RIT setting (UX-129) - 4-bit signed nybble (+7/-8)
@@ -84,6 +84,7 @@ U8	bandid_s;							// bandid for sub (index into above data structures)
 U32	vfot;								// temp vfo used for calculations and TX frequency
 U32	vfotr;								// tr vfo
 U32	mhz_step;							// mhz digit add value - tracks the digit index in the thumbwheel digit adjust mode
+U8	mute_band;							// flags to control audio mute function for main/sub (mirror of lcd.c mute_mode)
 
 // upper frequency limits for each band
 U32	vfo_ulim[] = { 40000L, 60000L, 170000L, 228000L, 470000L, 1310000L };
@@ -116,6 +117,9 @@ U32	so_initc[] = { 0x2B014a5a, 0x1D00ca08,		// 146.52 (m), 446.00 (s)
 				   0x3E002088,					// vol right
 				   0x3CA000EA					// tone enc
 				   };
+
+// **************************************************************
+// local Fn declarations
 
 U8 get_bandid(U32 freqMM);
 U8 get_busy(void);
@@ -301,7 +305,12 @@ void  process_SOUT(U8 cmd){
 				// process sout signals
 				if(sout_flags){															// if not zero, there are (bit-mapped) signals to process
 					pptr = pll_buf;														// preset sout buffer pointer
-					i = get_bit(sout_flags);											// get an ordinal value for the highest priority signal
+					// get an ordinal value for the highest priority signal
+					if(mute_time(0)){
+						i = get_bit(sout_flags & ~(SOUT_MVOL_F|SOUT_SVOL_F));			// if mute delay, mask off vol flags
+					}else{
+						i = get_bit(sout_flags);
+					}
 					switch(i){															// this will mechanize the various updates to process in order without collision
 					case SOUT_VFOM_N:
 						if(sin_addr1 & SIN_SEND) i = 1;									// get current state of PTT
@@ -320,17 +329,27 @@ void  process_SOUT(U8 cmd){
 						break;
 
 					case SOUT_MVOL_N:													// process VOL/SQU triggers...
-						pll_buf[0] = atten_calc(vol[bandid_m]) | ATTEN_MAIN | VOL_ADDR;
+						if(mute_band & MS_MUTE){
+							i = 0;														// 0 if muted
+						}else{
+							i = vol[bandid_m];
+						}
+						pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
 						pll_ptr = 0;
 						sout_flags &= ~SOUT_MVOL_F;										// clear signal flag
-						pll_buf[1] = 0xffffffffL;
+						pll_buf[1] = 0xfffffffeL;										// set to confirm mute
 						break;
 
 					case SOUT_SVOL_N:
-						pll_buf[0] = atten_calc(vol[bandid_s]) | ATTEN_SUB | VOL_ADDR;
+						if(mute_band & SUB_MUTE){
+							i = 0;
+						}else{
+							i = vol[bandid_s];
+						}
+						pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
 						pll_ptr = 0;
 						sout_flags &= ~SOUT_SVOL_F;										// clear signal flag
-						pll_buf[1] = 0xffffffffL;
+						pll_buf[1] = 0xfffffffeL;										// set to confirm mute
 						break;
 
 					case SOUT_MSQU_N:
@@ -367,7 +386,7 @@ void  process_SOUT(U8 cmd){
 			// wait for pacing timer
 			if(!sout_time(0xff)){														// check for the pacing timer to expire
 				// send buffer, 1 word/pass
-				if(pll_buf[pll_ptr] != 0xffffffff){										// all "f's" is end of buffer semaphore
+				if((pll_buf[pll_ptr] & 0xfffffff0) != 0xfffffff0){						// (almost) all "f's" is end of buffer semaphore
 					if((pll_buf[pll_ptr] & UX_XIT_MASK) != UX_XIT){						// process non-xit/rit messages
 						putsQ("so1");	// !!!debug
 						send_so(pll_buf[pll_ptr++]);									// send next word
@@ -395,6 +414,9 @@ void  process_SOUT(U8 cmd){
 						}
 					}
 				}else{
+					if(pll_buf[pll_ptr] == 0xfffffffe){									// look for mute confirm semaphore
+						mute_band |= 0x80;												// set muted flag
+					}
 					pll_ptr = 0xff;														// set end of tx flag
 				}
 			}
@@ -699,6 +721,8 @@ U32 atten_calc(U8 alevel){
 // adjust_vol updates vol registers
 //	hi-bit set, bit 0x40 clear: store masked value [5:0] to register
 //	ELSE: add signed value [5:0] to register with ceiling and floor limit enforced
+//	return new value
+//	--- NOTE: call with value = "0" to read current setting ---
 //-----------------------------------------------------------------------------
 U8 adjust_squ(U8 mainsub, S8 value){
 	S8	i;		// temp
@@ -723,13 +747,13 @@ U8 adjust_squ(U8 mainsub, S8 value){
 			if(sq[bandid_m] > 0x7f) sq[bandid_m] = 0;
 			if(sq[bandid_m] > LEVEL_MAX) sq[bandid_m] = LEVEL_MAX;
 			j = sq[bandid_m];
-			if(!value) sout_flags |= SOUT_MSQU_F;		// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_MSQU_F;	// send signal to update B-unit
 		}else{
 			sq[bandid_s] += i;							// adjust sub +/-
 			if(sq[bandid_s] > 0x7f) sq[bandid_s] = 0;
 			if(sq[bandid_s] > LEVEL_MAX) sq[bandid_s] = LEVEL_MAX;
 			j = sq[bandid_s];
-			if(!value) sout_flags |= SOUT_SSQU_F;		// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_SSQU_F;	// send signal to update B-unit
 		}
 	}
 	return j;											// return current value
@@ -758,13 +782,13 @@ U8 adjust_vol(U8 mainsub, S8 value){
 			if(vol[bandid_m] > 0x7f) vol[bandid_m] = 0;
 			if(vol[bandid_m] > LEVEL_MAX) vol[bandid_m] = LEVEL_MAX;
 			j = vol[bandid_m];
-			if(!value) sout_flags |= SOUT_MVOL_F;		// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_MVOL_F;	// send signal to update B-unit
 		}else{
 			vol[bandid_s] += i;							// adjust sub +/-
 			if(vol[bandid_s] > 0x7f) vol[bandid_s] = 0;
 			if(vol[bandid_s] > LEVEL_MAX) vol[bandid_s] = LEVEL_MAX;
 			j = vol[bandid_s];
-			if(!value) sout_flags |= SOUT_SVOL_F;		// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_SVOL_F;	// send signal to update B-unit
 		}
 	}
 	return j;											// return current value
@@ -1156,7 +1180,7 @@ U8 read_tsab(U8 main, U8 absel){
 
 	if(main) i = bandid_m;						// select rean Main or Sub
 	else i = bandid_s;
-	if(absel == 1) return tsa[i];
+	if(absel == TSA_SEL) return tsa[i];
 	return tsb[i];
 }
 
@@ -1169,7 +1193,7 @@ void set_tsab(U8 main, U8 absel, U8 value){
 
 	if(main) i = bandid_m;						// select duplex to modify
 	else i = bandid_s;
-	if(absel == 1) tsa[i] = value;
+	if(absel == TSA_SEL) tsa[i] = value;
 	else tsb[i] = value;
 	return;
 }
@@ -1193,13 +1217,37 @@ S32 set_mhz_step(S32 sval){
 S8 is_mic_updn(void){
     S8	i = 0;		// return value (no button)
 
-    if(sin_flags & SIN_MCK_F){
-    	if((sin_addr1 & (SIN_MUP | SIN_MCK)) == (SIN_MUP | SIN_MCK)) i = 1;		// if up button pressed, set +
-    	if((sin_addr1 & (SIN_MUP | SIN_MCK)) == (SIN_MCK)) i = -1;				// if dn button pressed, set -
-    	read_sin_flags(SIN_MCK_F);
-    	do_dial_beep();
-    }
-    // need a signal to trap repeat u/d if button is held for 1+ sec.  abt 200ms rep rate
+    // repeat u/d if button is held for 1+ sec.  abt 100ms rep rate
+	if(sin_addr1 & SIN_MCK){
+	    if(sin_flags & SIN_MCK_F){
+			mic_time(2);									// set long gap time for first press
+	    }
+		// hold-down/repeat timeout?
+		if(!mic_time(0)){
+			// yes => trip change flag & reset timer
+			sin_flags |= SIN_MCK_F;
+			mic_time(1);
+		}
+	}
+	if(!micdb_time(0)){
+	    if(sin_flags & SIN_MCK_F){
+	    	if((sin_addr1 & (SIN_MUP | SIN_MCK)) == (SIN_MUP | SIN_MCK)){
+	    		i = 1;										// if up button pressed, set +
+	    	}
+	    	if((sin_addr1 & (SIN_MUP | SIN_MCK)) == (SIN_MCK)){
+	    		i = -1;										// if dn button pressed, set -
+	    	}
+	    	if(i != 0){
+	    		micdb_time(1);								// set debounce timer
+	    		do_dial_beep();								// beep
+	    	}
+	    	read_sin_flags(SIN_MCK_F);
+	    }
+	}else{
+    	if((sin_addr1 & (SIN_MUP | SIN_MCK)) == (SIN_MCK)){
+	    	read_sin_flags(SIN_MCK_F);						// if dn during debounce, ignore and clear flag
+    	}
+	}
    return i;
 }
 
@@ -1521,6 +1569,26 @@ U8 inv_vfo(U8 focus){
 		vfo[i] = vfo[i] - (U32)offs[i];
 	}
 	return dplx[i] & DPLX_MASK;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// mute_radio() sets mute_band and triggers SOUT update
+//-----------------------------------------------------------------------------
+void mute_radio(U8 mutefl){
+
+	mute_band = mutefl;
+	sout_flags |= SOUT_MVOL_F | SOUT_SVOL_F;			// set signal flag
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_mute_radio() returns mute_band
+//-----------------------------------------------------------------------------
+U8 get_mute_radio(void){
+
+	return mute_band;
 }
 
 // end radio.c

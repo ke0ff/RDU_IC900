@@ -8,14 +8,37 @@
  *  Summary:
  *  This is the main code file for the IC-900 RDU Clone application.
  *
- *  Project scope revision history:
- *    <VERSION 0.0>
- *    09-20-16 jmh:  Creation Date - Copied source from KPU project
- *
  *******************************************************************/
 
 /********************************************************************
- *  File scope declarations revision history:
+ *  Project scope rev notes:
+ *    				 To-do Checklist time!
+ *    				 * test band switching (VFO button)
+ *    				 * Memory/Call mode:
+ *    				 	- establish memory map for stored channels
+ *    				 	- work out how to swap vfo pointer between VFO mode and memory mode
+ *    				 	- MWchr/CALLchr: memory/call mode transitions - need to remember previous mode.  Canceling a mode
+ *    				 		transitions back to the previous mode (need a bubble chart here)
+ *    				 	- MWchr_H/CALLchr_H: store memory
+ *    				 * SET loop:
+ *    				 	- DIM brightness setting, LCD and button
+ *    				 	- BRT brightness setting, LCD and button
+ *    				 * XIT/RIT adjust (perhaps use VFOchr_H ???)
+ *    				 * come up with a way to suppress key-hold beeps if there is no feature implemented for a specific key
+ *
+ *
+ *    Project scope rev History:
+ *    09-03-21 jmh:	 mic u/d buttons debugged and working with step-repeat after 1 sec (added step-repeat and debounce)
+ *    				 Added 2 and 3 beep mode to main.c to allow lcd.c to signal mode timeouts.  These are handled in the
+ *    				 	main timer interrupt, so there is no delay to the lcd.c process loops.
+ *    				 M/S during s-mute: revamped the mute mechanism to handle band swaps (removed the save/restore volume
+ *    				 	array nonsense).  radio.c now has a mirror flag which is used to mute audio at the SOUT "source".
+ *    				 	mute_radio & get_mute_radio are the gateway fns.  Hi-bit of local mirror flag indicates when the mute
+ *    				 	message has been delivered to the radio.  This can be used to control band-swap mutes.  However, some
+ *    				 	kind of trap needs to be implemented to cover band swaps while smute functions are in play.
+ *    				 	!!! need some code debug here to handle the band-swaps
+ *    				 TSchr_H mode to adjust a/b freq in steps (A/B) of 5/10, 5/25, or 10/25 Khz.
+ *    				 Added code to cancel vol/squ if VFO, MR, SUB, MS, or CALL keys are pressed.
  *    08-23-21 jmh:	 VOL/SQU display working by modifying srf display routines to differentiate the levels from SRF values
  *    					using the hi-bit of the calling parameter ( see msmet() and ssmet() ).
  *    08-22-21 jmh:	 hib crc working.  Re-worked hib structures to save some memory.
@@ -38,7 +61,7 @@
  *    					will likey break the "high byte" scavange scheme.
  *    08-14-21 jmh:	 Basic RX process in-place.  A fixed freq lashup for 2m/440.  Updates SMET and RX leds.
  *    08-10-21 jmh:	 Added process_SIN() to input status data from base unit.
- *    08-08-21 jmh:	 Freq main and sub debugged.  Also Msmet and Ssmet and channel display.  Finished
+ *    08-08-21 jmh:	 Freq main and sub debugged.  Also msmet and ssmet and channel display.  Finished
  *    					ASCII display Fns for M/S freq and M/S mem channel.
  *    				 All basic LCD routines are coded and mostly tested.  The code is sufficient to allow
  *    				 	a basic VFO radio to be constructed (including the TX/RX LEDs).
@@ -81,6 +104,7 @@
  *    				 Fixed HM151 data capture to ignore data if IC7K is the mic switch load.
  *    				 Fixed HM151 key capture: was not sending ";" terminator until next keypress.
  *    09-20-16 jmh:  creation date
+ *    				 <VERSION 0.0>
  *
  *******************************************************************/
 
@@ -210,6 +234,11 @@ U16		vtimer;							// vol access timer
 U16		offstimer;						// offs access timer
 U16		settimer;						// set access timer
 U16		subtimer;						// sub focus timer
+U8		beepgaptimer;					// beep gap timer
+U16		mictimer;						// mic button repeat timer
+U8		micdbtimer;						// mic button dbounce timer
+U8		mutetimer;						// vol mute timer
+U16		tstimer;						// TS adj mode timer
 U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
 U8		idx;
@@ -246,6 +275,7 @@ U8		pwm_master;						// led master level
 S8		main_dial;
 U16		beep_count;						// beep duration register
 U16		beep_counter;					// beep duration counter
+U8		num_beeps;						// number of beeps counter
 U8		sw_state;
 U8		sw_change;
 //char	dbbuf[30];	// debug buffer
@@ -551,10 +581,10 @@ char *gets_tab(char *buf, char *save_buf[], int n)
 char process_IO(U8 flag){
 
 	// process IPL init
-	if(flag == 0xff){							// perform init/debug fns
+	if(flag == 0xff){									// perform init/debug fns
 		// init LCD
 		init_lcd();
-		ptt_mode = 0xff;						// force init
+		ptt_mode = 0xff;								// force init
 		process_SIN(flag);
 		process_SOUT(flag);
 		process_UI(flag);
@@ -1167,6 +1197,26 @@ U8 q_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
+// ts_time
+//-----------------------------------------------------------------------------
+//
+// ts_time() sets/reads the ts adj timer (1 sets, 0xff clears)
+//
+
+U8 ts_time(U8 tf){
+
+	if(tf == 0xff){
+		tstimer = 0;
+	}else{
+		if(tf){
+			tstimer = TSW_TIME;
+		}
+	}
+	if(tstimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 // offs_time
 //-----------------------------------------------------------------------------
 //
@@ -1207,6 +1257,69 @@ U8 sub_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
+// mic_time
+//-----------------------------------------------------------------------------
+//
+// mic_time() sets/reads the mic button repeat timer (1 sets, 0xff clears)
+//
+
+U8 mic_time(U8 set){
+
+	if(set == 0xff){
+		mictimer = 0;
+	}else{
+		if(set == 1){
+			mictimer = MIC_RPT_TIME;
+		}
+		if(set == 2){
+			mictimer = MIC_RPT_WAIT;
+		}
+	}
+	if(mictimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// micdb_time
+//-----------------------------------------------------------------------------
+//
+// micdb_time() sets/reads the mic button debounce timer (1 sets, 0xff clears)
+//
+
+U8 micdb_time(U8 tf){
+
+	if(tf == 0xff){
+		micdbtimer = 0;
+	}else{
+		if(tf == 1){
+			micdbtimer = MIC_DB_TIME;
+		}
+	}
+	if(micdbtimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// mute_time
+//-----------------------------------------------------------------------------
+//
+// mute_time() sets/reads the vol mute timer (1 sets, 0xff clears)
+//
+
+U8 mute_time(U8 tf){
+
+	if(tf == 0xff){
+		mutetimer = 0;
+	}else{
+		if(tf == 1){
+			mutetimer = MUTE_TIME;
+		}
+	}
+	if(mutetimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 // set_dial, get_dial
 //-----------------------------------------------------------------------------
 //
@@ -1230,11 +1343,32 @@ S8 get_dial(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// do_dial_beep, triggers a dial beep
+// do_dial_beep, triggers a dial beep (or 2 or 3 q-beeps)
 //-----------------------------------------------------------------------------
 void do_dial_beep(void){
 
-	d_beep;										// dial beep
+	d_beep;										// dial beep (short)
+	return;
+}
+
+void do_1beep(void){
+
+	q_beep;										// long beep
+	num_beeps = 0;
+	return;
+}
+
+void do_2beep(void){
+
+	q_beep;										// 2x long beep
+	num_beeps = 1;
+	return;
+}
+
+void do_3beep(void){
+
+	q_beep;										// 3x long beep
+	num_beeps = 2;
 	return;
 }
 
@@ -1373,6 +1507,9 @@ static	U16	key_last;				// last key
 		kbup_flag = 0;
 		kpscl = KEY_PRESCALE;
 		beepdly_timer = 0;
+		beepgaptimer = BEEP_GAP;
+		num_beeps = 0;
+		mictimer = 0;
 //		prescale = 0;				// init resp led regs
 	}
 	// state machine to process local keypad
@@ -1507,8 +1644,29 @@ static	U16	key_last;				// last key
 	if (offstimer != 0){								// update offs adjust timer
 		offstimer--;
 	}
-	if (subtimer != 0){								// update offs adjust timer
+	if (subtimer != 0){									// update sub adjust timer
 		subtimer--;
+	}
+	if (mictimer != 0){									// update mic button repeat timer
+		mictimer--;
+	}
+	if (micdbtimer != 0){								// update mic button debounce timer
+		micdbtimer--;
+	}
+	if (mutetimer != 0){								// volume mute timer
+		mutetimer--;
+	}
+	if (tstimer != 0){									// update set mode timer
+		tstimer--;
+	}
+	if(num_beeps){
+		if (beepgaptimer != 0){							// update beep gap timer
+			--beepgaptimer;
+		}else{
+			q_beep;										// dial beep
+			num_beeps--;
+			beepgaptimer = BEEP_GAP;
+		}
 	}
 	if (dialtimer != 0){								// update wait timer
 		if(!(--dialtimer)){
