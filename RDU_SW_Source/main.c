@@ -13,6 +13,7 @@
 /********************************************************************
  *  Project scope rev notes:
  *    				 To-do Checklist time!
+ *    				 * Modify send_vfo() and all other HIB interfaces to use SPI-NVRAM
  *    				 * test band switching (VFO button)
  *    				 * Memory/Call mode:
  *    				 	- establish memory map for stored channels
@@ -28,6 +29,15 @@
  *
  *
  *    Project scope rev History:
+ *    09-09-21 jmh:	 Incorporated NVRAM mod (revA of the schem, dated 9/09/21 or later).  Connects a 1Mb auto-store SPI NVRAM
+ *    					to the SPI port.  Use this instead of HIB and EEPROM to store NV data.  Requires bit-bang SPI because
+ *    					there are no SSIRX I/O pins available without significantly upsetting the GPIO map.
+ *    				 Added Timer1B to pace the bit-bang SPI.
+ *    				 Added shift_spi() to localize the generic parts of the BB SPI algorithm.
+ *    				 Modified send_spi3() to simply wait for busy, then send inverted data to shift_spi().
+ *    				 Added beginnings of support Fns and #defines for the NVRAM command interface.
+ *    				 Replaced IC2 on LCD board to correct wonky segment behavior.  Initial results good (always, until they are not).
+ *    09-06-21 jmh:	 Placed hooks for managing the MUX of LOCK and MISO (renamed #defines and added inhibit to lock/dim read)
  *    09-03-21 jmh:	 mic u/d buttons debugged and working with step-repeat after 1 sec (added step-repeat and debounce)
  *    				 Added 2 and 3 beep mode to main.c to allow lcd.c to signal mode timeouts.  These are handled in the
  *    				 	main timer interrupt, so there is no delay to the lcd.c process loops.
@@ -134,6 +144,7 @@
 //
 //  Interrupt Resource Map:
 //	*	Timer0A			PF0:		SW gated 1KHz pulse output to drive piezo spkr (uses PWM and ISR to generate and gate off the beep)
+//	*	Timer1A			--			serial pacing timer
 //	*	SSI1			PF1:		ASO async output (4800 baud, 1 start, 30 bit + 1 stop (plus an implied stop bit)
 //		Timer2A			PF4:		isr ASI async input (4800 baud, 1 start, ... )
 //		GPIO FE			PF4:		ISR (detects ASI start bit, starts Timer2A)
@@ -336,6 +347,7 @@ main(void)
     iplt2 = 1;											// init timer1
     ipl = proc_init();									// initialize the processor I/O
     main_dial = 0;
+    init_spi3();
     do{													// outer-loop (do forever, allows soft-restart)
         rebufN[0] = rebuf0;								// init CLI re-buf pointers
     	rebufN[1] = rebuf1;
@@ -879,7 +891,10 @@ void wait(U16 waitms)
 }
 
 //-----------------------------------------------------------------------------
-// wait2() does quick delay pace
+// wait2() does quick delay pace =  (5.6us * waitms)
+//		Emperical measurements with SYSCLK = 50 MHz give the following
+//			timing value: waitms = 2 gives a time delay of about 11.2 us
+//			(about 560ns per for() cycle) {+/- interrupt variations}
 //-----------------------------------------------------------------------------
 void wait2(U16 waitms)
 {

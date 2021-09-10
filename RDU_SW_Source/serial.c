@@ -23,6 +23,7 @@
 #include "stdio.h"
 #include "serial.h"
 #include "cmd_fn.h"
+//#define UART1_ENABLED
 
 //------------------------------------------------------------------------------
 // Define Statements
@@ -113,7 +114,9 @@ void initserial(void){
 	xmode = FALSE;
 	handshake = FALSE;				// xon/xoff enable
 	xoffsent = FALSE;				// xoff sent
+#ifdef UART1_ENABLED
     init_uart1(115200L);
+#endif
 }
 
 /****************
@@ -844,7 +847,7 @@ void init_tsip1(void){
 //	no cr/lf translation
 //-----------------------------------------------------------------------------
 char putchar1(char c){
-
+#ifdef UART1_ENABLED
 	// output cr if c = \n		// no xmodem
 	if(c == '\n'){
 	    wait_reg0(&UART1_FR_R, UART_FR_TXFF, CHR_WAT0);	// wait up for fifo to clear
@@ -855,6 +858,7 @@ char putchar1(char c){
     wait_reg0(&UART1_FR_R, UART_FR_TXFF, CHR_WAT0);	// wait up for fifo to clear
 //	while((UART0_FR_R & 0x0020) == 0x0020);
 	UART1_DR_R = c;
+#endif
 	return (c);
 }
 
@@ -974,10 +978,12 @@ char getch01(void){
 //-----------------------------------------------------------------------------
 char putchar_b(char c){
 
+#ifdef	UART1_ENABLED
 	// output character
     wait_reg0(&UART1_FR_R, UART_FR_TXFF, CHR_WAT0);	// wait up for fifo to clear
 //	while((UART0_FR_R & 0x0020) == 0x0020);
 	UART1_DR_R = c;
+#endif
 	return c;
 }
 

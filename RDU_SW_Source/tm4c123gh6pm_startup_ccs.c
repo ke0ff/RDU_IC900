@@ -42,7 +42,8 @@ static void UART1Handler(void);
 static void GPIO_C_Handler(void);
 static void GPIO_F_Handler(void);
 static void TIMER0AHandler(void);
-static void TIMER1Handler(void);
+static void TIMER1AHandler(void);
+static void TIMER1BHandler(void);
 static void TIMER2AHandler(void);
 static void TIMER3AHandler(void);
 //static void TIMER3BHandler(void);
@@ -120,8 +121,8 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      //34 Watchdog timer
 	TIMER0AHandler,                 	    //35 Timer 0 subtimer A
     IntDefaultHandler,                      //36 Timer 0 subtimer B
-    TIMER1Handler,                          //37 Timer 1 subtimer A
-    IntDefaultHandler,                      //38 Timer 1 subtimer B
+    TIMER1AHandler,                         //37 Timer 1 subtimer A
+	TIMER1BHandler,                      	//38 Timer 1 subtimer B
     TIMER2AHandler,                         //39 Timer 2 subtimer A
     IntDefaultHandler,                      //40 Timer 2 subtimer B
     IntDefaultHandler,                      //41 Analog Comparator 0
@@ -364,9 +365,15 @@ TIMER0AHandler(void)
 //
 //*****************************************************************************
 static void
-TIMER1Handler(void)
+TIMER1AHandler(void)
 {
-	Timer1A_ISR();					// process timer1 interrupt
+	Timer1A_ISR();					// process timer1A interrupt
+}
+
+static void
+TIMER1BHandler(void)
+{
+	Timer1B_ISR();					// process timer1B interrupt
 }
 
 //*****************************************************************************

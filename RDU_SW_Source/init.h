@@ -101,6 +101,9 @@
 #define TIMER3_ILR 0xffff			// timer 3 interval (24 bit)
 #define TIMER3_PS 32
 
+#define TIMER1B_PS 		1			// prescale value for timer1B
+#define	BBSPICLK_FREQ	200000L		// edge freq fro BB SPI clk
+
 #define	TPULSE	(100L)				// in usec
 #define TMIN	(((SYSCLK / 100) * TPULSE)/10000L)	// minimum pulse width
 
@@ -133,15 +136,15 @@
 // Port B defines
 #define RXD1			0x01		// in		uart1
 #define TXD1			0x02		// out		uart1
-#define LOCK			0x04		// in		(dedicated input) lock slide sw
+#define MISO_LOCK		0x04		// in		(mux'd input) SPI MISO (bit-bang) when RAMCS_N == 0 & lock slide sw when RAMCS_N == 1
 #define DIM				0x08		// in		(dedicated input) dim slide sw
 #define HILO			0x10		// in		(dedicated input) hi/lo pbsw
 #define CHECK			0x20		// in		(dedicated input) check pbsw
 #define SMUTE			0x40		// in		(dedicated input) smute pbsw
 #define LCDRST			0x80		// out		lcd controller reset
 #define PORTB_DIRV		(TXD1|LCDRST)
-#define	PORTB_DENV		(RXD1|TXD1|LOCK|DIM|HILO|CHECK|SMUTE|LCDRST)
-#define	PORTB_PURV		(DIM|LOCK|HILO|CHECK|SMUTE)
+#define	PORTB_DENV		(RXD1|TXD1|MISO_LOCK|DIM|HILO|CHECK|SMUTE|LCDRST)
+#define	PORTB_PURV		(DIM|MISO_LOCK|HILO|CHECK|SMUTE)
 #define	PORTB_INIT		(LCDRST)
 #define	BBUTTON_MASK	(HILO|CHECK|SMUTE)
 
@@ -163,13 +166,16 @@
 #define sparePD2		0x04		// IN/AIN	spare (AIN5)
 #define MOSI_N			0x08		// out		ss13Tx, data out
 #define sparePD4		0x10		// out
-#define sparePD5		0x20		// out
+#define RAMCS_N			0x20		// out		NVRAM cs and gate for LOCK swithc
 #define CS2				0x40		// out		LCD IC2 cs		qei0A
 #define MTX_N			0x80		// out						qei0B
-#define PORTD_DIRV		(SCK|CS1|CS2|MOSI_N|sparePD5|MTX_N)
-#define	PORTD_DENV		(SCK|CS1|CS2|MOSI_N|sparePD4|sparePD5|MTX_N)
+#define PORTD_DIRV		(SCK|CS1|CS2|MOSI_N|RAMCS_N|MTX_N)
+#define	PORTD_DENV		(SCK|CS1|CS2|MOSI_N|sparePD4|RAMCS_N|MTX_N)
 #define	PORTD_PURV		(sparePD4)
-#define	PORTD_INIT		(MOSI_N|sparePD5)
+#define	PORTD_INIT		(MOSI_N|RAMCS_N)
+
+#define	RAM_SELECT		0
+#define	LOCK_SELECT		RAMCS_N
 
 #define	LCD_IC1			0x01		// LCD CS identifiers
 #define	LCD_IC2			0x02

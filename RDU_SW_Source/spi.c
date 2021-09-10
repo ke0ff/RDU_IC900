@@ -22,14 +22,34 @@
 #include "spi.h"
 #include "lcd.h"
 
+// ******************************************************************
+// defines
+
+	volatile	U8	ssiflag;			// clock edge trigger (if == 1), set by Timer1B ISR
+
+// declarations
+U8 shift_spi(U8 dato);
+void open_nvr(void);
+void close_nvr(void);
+
+// ******************************************************************
 // ***** START OF CODE ***** //
+/****************
+ * init_spi3 initializes bit-bang QSSI
+ */
+void init_spi3(void)
+{
+
+	ssiflag = 0;									// init volatiles
+//	TIMER1_IMR_R |= TIMER_IMR_TBTOIM;				// enable timer intr
+	return;
+}
 
 /****************
- * send_spi3 does bit-bang SPI for port1 <<< place holder for QSPI implementation >>>
+ * send_spi3 does bit-bang SPI for port1 <<< with the addition of the SPI NVRAM, the QSPI implementation is now deprecated -- !! DO NOT USE !! >>>
  */
 uint8_t send_spi3(uint8_t data)
 {
-#define	SPI_DLY	2
 
 #if (USE_QSPI == 1)
 
@@ -44,25 +64,42 @@ uint8_t send_spi3(uint8_t data)
 	return 0;
 
 #else
-	// use bit-bang SSI
+	// use bit-bang SSI (for LCD -- checks for LCD BUSY == 1 before sending)
 	//
-	uint8_t	i;
-//	uint8_t di = 0;
 
-    wait_reg1(&GPIO_PORTE_DATA_R, BUSY_N, BUSY_WAT);	// wait LCD busy to set
-//	while(!(GPIO_PORTE_DATA_R & BUSY_N));	// wait for not busy
-//	wait(3);									// delay busy
-	for(i=0x80;i;i >>= 1){
-		if(i & data) GPIO_PORTD_DATA_R &= ~(MOSI_N);	// set MOSI
-		else GPIO_PORTD_DATA_R |= MOSI_N;
-		GPIO_PORTD_DATA_R |= SCK;						// clr SCK
-		wait2(SPI_DLY);									// delay bit_time/2
-		GPIO_PORTD_DATA_R &= ~SCK;						// set SCK
-		wait2(SPI_DLY);									// delay bit_time/2
-	}
-//	wait2(SPI_DLY*2);									// delay bit_time/2
+    wait_reg1(&GPIO_PORTE_DATA_R, BUSY_N, BUSY_WAT);	// wait for LCD busy to set
+    shift_spi(~data);									// invert LCD data because of the inverting level shifter driving the LCD chips (NVRAM doesn't get inverted)
 	return 0;
 #endif
+}
+
+//-----------------------------------------------------------------------------
+// shift_spi() drives shift engine for bit-bang SSI
+//	returns receive data (requires NVRAM CS to be low to receive NVRAM data,
+//	else all you get is the lock switch status)
+//	Uses ssiflag trigger from Timer1B_ISR to apply the clock period to each edge
+//-----------------------------------------------------------------------------
+U8 shift_spi(U8 dato){
+	U8	i;
+	U8	datain = 0;
+
+	ssiflag = 0;
+	TIMER1_CTL_R |= (TIMER_CTL_TBEN);					// enable timer
+	while(!ssiflag);									// sync sync to timer ISR
+	ssiflag = 0;
+	for(i=0x80;i;i >>= 1){
+		if(i & dato) GPIO_PORTD_DATA_R |= MOSI_N;		// set MOSI
+		else GPIO_PORTD_DATA_R &= ~MOSI_N;				// clear MOSI
+		GPIO_PORTD_DATA_R |= SCK;						// clr SCK (it is inverted before reaching the slave devices)
+		while(!ssiflag);								// delay 1/2 bit time
+		ssiflag = 0;
+		if(GPIO_PORTB_DATA_R & MISO_LOCK) datain |= i;	// capture MISO == 1
+		GPIO_PORTD_DATA_R &= ~SCK;						// set SCK
+		while(!ssiflag);								// delay 1/2 bit time
+		ssiflag = 0;
+	}
+	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);					// disable timer
+	return datain;
 }
 
 //-----------------------------------------------------------------------------
@@ -107,7 +144,6 @@ void spi3_clean(void)
 	return;
 }
 
-
 /****************
  * open_spi starts an spi message by lowering CS to the addressed device (1 or 0)
  */
@@ -148,5 +184,59 @@ void lcd_cmd(U8 cdata)
 		GPIO_PORTE_DATA_R &= ~DA_CM;					// set cmd
 	}
 	wait(1);
+	return;
+}
+
+//************************************************************************
+// NVRAM support Fns
+//************************************************************************
+
+/****************
+ * open_nvr starts an spi message by lowering RAMCS_N
+ */
+void open_nvr(void)
+{
+
+	GPIO_PORTD_DATA_R &= ~RAMCS_N;						// open NVRAM
+	return;
+}
+
+/****************
+ * close_nvr closes an spi message by raising RAMCS_N
+ */
+void close_nvr(void)
+{
+
+	GPIO_PORTD_DATA_R |= RAMCS_N;						// close NVRAM
+	return;
+}
+
+/****************
+ * wen_nvr sends write enable cmd to the NVRAM
+ */
+void wen_nvr(void)
+{
+
+	open_nvr();
+	shift_spi(WREN);
+	close_nvr();
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// Timer1B_ISR() drives bit-bang SPI
+//-----------------------------------------------------------------------------
+//
+// Called when timer 1B overflows (NORM mode):
+//	Timer1_B runs as 16 bit reload timer set to 5us interrupt rate
+//	This gives a 100KHz SPI clk
+//
+//-----------------------------------------------------------------------------
+
+void Timer1B_ISR(void)
+{
+
+	// set flag to trigger bit
+	ssiflag = 1;
 	return;
 }

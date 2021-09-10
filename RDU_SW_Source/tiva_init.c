@@ -155,9 +155,22 @@ U16 proc_init(void){
 	TIMER1_TAPR_R = TIMER1_PS;
 	TIMER1_TAILR_R = (uint16_t)(SYSCLK/(TIMER1_FREQ * (TIMER1_PS + 1)));
 	TIMER1_IMR_R = TIMER_IMR_TATOIM;				// enable timer intr
-	TIMER1_CTL_R |= (TIMER_CTL_TAEN);				// enable timer
+//	TIMER1_CTL_R |= (TIMER_CTL_TAEN);				// enable timer
 	TIMER1_ICR_R = TIMER1_MIS_R;					// clear any flagged ints
 	NVIC_EN0_R = NVIC_EN0_TIMER1A;					// enable timer1A intr in the NVIC_EN regs
+
+	// init timer1B (bit-bang SPI, no GPIO)
+	SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;
+	ui32Loop = SYSCTL_RCGCGPIO_R;
+	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);				// disable timer
+//	TIMER1_CFG_R = TIMER_CFG_16_BIT; //0x4; //0;
+	TIMER1_TBMR_R = TIMER_TBMR_TBMR_PERIOD;
+	TIMER1_TBPR_R = TIMER1B_PS;
+	TIMER1_TBILR_R = (uint16_t)(SYSCLK/(BBSPICLK_FREQ * (TIMER1B_PS + 1)));
+	TIMER1_IMR_R |= TIMER_IMR_TBTOIM;				// enable timer intr
+//	TIMER1_CTL_R |= (TIMER_CTL_TBEN);				// enable timer
+	TIMER1_ICR_R = TIMER1_MIS_R;					// clear any flagged ints
+	NVIC_EN0_R = NVIC_EN0_TIMER1B;					// enable timer1A intr in the NVIC_EN regs
 
 	// init Timer3A (appl timer, count down, no GPIO)
 	SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R3;

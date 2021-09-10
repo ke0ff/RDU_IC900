@@ -182,7 +182,9 @@ void process_UI(U8 cmd){
 	//**************************************
 	// process IPL (Initial Program Load) init
 	if(cmd == 0xff){
-		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | LOCK);					// force update of slide switch status
+		GPIO_PORTD_DATA_R |= LOCK_SELECT;
+		wait(10);
+		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);					// force update of slide switch status
 		mode = MAIN_MODE;												// init process variables
 		chkmode = 0;
 		vfo_display = 0;
@@ -234,21 +236,24 @@ void process_UI(U8 cmd){
 		}
 		//**************************************
 		// process slide switches (DIM and LOCK)
-		i = GPIO_PORTB_DATA_R & (DIM | LOCK);							// capture DIM/LOCK switch settings
-		if(i ^ sw_stat){												// if changes..
-			if(i & DIM){
-		        set_pwm(5, 90);											// process bright settings (!!! these need to be configurable in SET loop)
-		        set_pwm(6, 90);
-			}else{
-		        set_pwm(5, 30);											// process DIM settings (!!! these need to be configurable in SET loop)
-		        set_pwm(6, 30);
+		if(GPIO_PORTB_DATA_R & (RAMCS_N) == LOCK_SELECT){
+			wait(5);														// guaranteed settling time !!! need better solution here
+			i = GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);						// capture DIM/LOCK switch settings
+			if(i ^ sw_stat){												// if changes..
+				if(i & DIM){
+			        set_pwm(5, 90);											// process bright settings (!!! these need to be configurable in SET loop)
+			        set_pwm(6, 90);
+				}else{
+			        set_pwm(5, 30);											// process DIM settings (!!! these need to be configurable in SET loop)
+			        set_pwm(6, 30);
+				}
+				if(i & MISO_LOCK){
+					alock(1);												// process lock mode
+				}else{
+					alock(0);												// process unlock mode
+				}
+				sw_stat = (sw_stat & ~(DIM | MISO_LOCK)) | i;					// update GPIO memory (used to trap changes)
 			}
-			if(i & LOCK){
-				alock(1);												// process lock mode
-			}else{
-				alock(0);												// process unlock mode
-			}
-			sw_stat = (sw_stat & ~(DIM | LOCK)) | i;					// update GPIO memory (used to trap changes)
 		}
 	}
 	return;
