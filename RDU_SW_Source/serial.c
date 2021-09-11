@@ -23,7 +23,7 @@
 #include "stdio.h"
 #include "serial.h"
 #include "cmd_fn.h"
-//#define UART1_ENABLED
+#define UART1_ENABLED
 
 //------------------------------------------------------------------------------
 // Define Statements

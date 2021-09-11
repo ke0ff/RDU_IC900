@@ -29,6 +29,26 @@
 #define	XIT_HIB_ADR		3
 #define	RIT_HIB_ADR		7
 
+// NVRAM memory map
+#define	NVRAM_BASE	(0L)
+#define	VFO_0		(NVRAM_BASE)				// main vfo array
+#define	OFFS_0		(VFO_0 + (sizeof(U32) * NUM_VFOS))	// TX offset array
+#define	DPLX_0		(OFFS_0 + (sizeof(U16) * NUM_VFOS))	// duplex/RFpwr/XIT/MEM - array
+#define	CTCSS_0		(DPLX_0 + (NUM_VFOS))		// PL setting array
+#define	TSA_0		(CTCSS_0 + (NUM_VFOS))		// frq step "A" array
+#define	TSB_0		(TSA_0 + (NUM_VFOS))		// frq step "B" array
+#define	SQ_0		(TSB_0 + (NUM_VFOS))		// SQ array
+#define	VOL_0		(SQ_0 + (NUM_VFOS))			// VOL array
+#define	MEM_0		(VOL_0 + (NUM_VFOS))		// mem# array
+#define	XIT_0		(MEM_0 + (NUM_VFOS))		// xit reg
+#define	RIT_0		(XIT_0 + 1)					// rit reg
+#define	BIDM_0		(RIT_0 + 1)					// bandidm reg
+#define	BIDS_0		(BIDM_0 + 1)				// bandids reg
+
+#define	VFO_END		(BIDS_0 + 1)				// start of next segment
+
+
+
 // CTCSS flags
 #define	CTCSS_MASK		0x3F				// tone code mask
 #define	TONE_MAX		38					// max # PL tones
@@ -106,7 +126,7 @@
 U32 init_radio(void);
 void process_SIN(U8 cmd);
 void process_SOUT(U8 cmd);
-void  save_vfo(void);
+void  save_vfo(U8 b_id);
 void  recall_vfo(void);
 //U16 crc_vfo(void);
 U16 crc_hib(void);

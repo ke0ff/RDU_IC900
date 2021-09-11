@@ -30,7 +30,6 @@
 // declarations
 U8 shift_spi(U8 dato);
 void open_nvr(void);
-void close_nvr(void);
 
 // ******************************************************************
 // ***** START OF CODE ***** //
@@ -83,22 +82,20 @@ U8 shift_spi(U8 dato){
 	U8	i;
 	U8	datain = 0;
 
-	ssiflag = 0;
-	TIMER1_CTL_R |= (TIMER_CTL_TBEN);					// enable timer
-	while(!ssiflag);									// sync sync to timer ISR
-	ssiflag = 0;
 	for(i=0x80;i;i >>= 1){
 		if(i & dato) GPIO_PORTD_DATA_R |= MOSI_N;		// set MOSI
 		else GPIO_PORTD_DATA_R &= ~MOSI_N;				// clear MOSI
 		GPIO_PORTD_DATA_R |= SCK;						// clr SCK (it is inverted before reaching the slave devices)
+		ssiflag = 0;
 		while(!ssiflag);								// delay 1/2 bit time
 		ssiflag = 0;
 		if(GPIO_PORTB_DATA_R & MISO_LOCK) datain |= i;	// capture MISO == 1
 		GPIO_PORTD_DATA_R &= ~SCK;						// set SCK
-		while(!ssiflag);								// delay 1/2 bit time
 		ssiflag = 0;
+		while(!ssiflag);								// delay 1/2 bit time
 	}
-	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);					// disable timer
+	ssiflag = 0;
+	while(!ssiflag);									// delay 1/2 bit time
 	return datain;
 }
 
@@ -149,6 +146,7 @@ void spi3_clean(void)
  */
 void open_spi(uint8_t addr)
 {
+	TIMER1_CTL_R |= (TIMER_CTL_TBEN);					// enable bit timer
 	GPIO_PORTE_ICR_R = (BUSY_N);						// pre-clear edge flag
 	if(addr){
 		GPIO_PORTD_DATA_R |= (CS2);						// open IC1 /CS
@@ -156,7 +154,7 @@ void open_spi(uint8_t addr)
 		GPIO_PORTD_DATA_R |= (CS1);						// open IC2 /CS
 	}
 	// wait for busy == 0
-	wait_busy0(3);										// wait 3m (max) for busy to release
+	wait_busy0(3);										// wait 3ms (max) for busy to release
 	return;
 }
 
@@ -169,6 +167,7 @@ void close_spi(void)
 //	wait(3);											// delay busy
 //    wait_reg0(&GPIO_PORTE_DATA_R, BUSY_N, BUSY_WAT);	// wait up for not busy
 	GPIO_PORTD_DATA_R &= ~(CS1 | CS2);					// close all SPI /CS
+	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);					// disable timer
 	return;
 }
 
@@ -197,7 +196,10 @@ void lcd_cmd(U8 cdata)
 void open_nvr(void)
 {
 
+	TIMER1_CTL_R |= (TIMER_CTL_TBEN);					// enable bit timer
 	GPIO_PORTD_DATA_R &= ~RAMCS_N;						// open NVRAM
+	ssiflag = 0;
+	while(!ssiflag);									// sync to bit timer ISR & setup time
 	return;
 }
 
@@ -208,6 +210,9 @@ void close_nvr(void)
 {
 
 	GPIO_PORTD_DATA_R |= RAMCS_N;						// close NVRAM
+	ssiflag = 0;
+	while(!ssiflag);									// hold time (1/2 bit)
+	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);					// disable timer
 	return;
 }
 
@@ -223,6 +228,145 @@ void wen_nvr(void)
 	return;
 }
 
+/****************
+ * storecall_nvr sends store or recall cmd to the NVRAM
+ *	tf_fl == 1 is store, else recall
+ */
+void storecall_nvr(U8 tf_fl)
+{
+
+	open_nvr();
+	if(tf_fl) shift_spi(STORE);
+	else shift_spi(RECALL);
+	close_nvr();
+	return;
+}
+
+/****************
+ * rws_nvr sends status-rw cmd to the NVRAM
+ *
+ *	set hi-bit of mode (CS_WRITE) to signal write
+ */
+U8 rws_nvr(U8 dataw, U8 mode)
+{
+	U8	i;		// temp
+
+	if(mode & CS_WRITE) i = WRSR;
+	else i = RDSR;
+	open_nvr();
+	shift_spi(i);
+	i = shift_spi(dataw);
+	close_nvr();
+	return i;
+}
+
+/****************
+ * rw8_nvr sends byte-rw cmd to the NVRAM
+ *
+ * Supports repeated write/read based on state of mode flag:
+ *	if mode = OPEN, assert CS and sent r/w cmd and address
+ *	if mode = CLOSE, de-assert CS at end
+ *	else, just send/rx data byte
+ *	set hi-bit of mode (CS_WRITE) to signal write
+ */
+U8 rw8_nvr(U32 addr, U8 dataw, U8 mode)
+{
+	U8	i;		// temp
+
+	if(mode & CS_OPEN){
+		if(mode & CS_WRITE){
+			i = WRITE;
+			wen_nvr();							// have to enable writes for every cycle
+		}else{
+			i = READ;
+		}
+		open_nvr();
+		shift_spi(i);
+		shift_spi((U8)(addr >> 16));
+		shift_spi((U8)(addr >> 8));
+		shift_spi((U8)(addr));
+	}
+	i = shift_spi(dataw);
+	if(mode & CS_CLOSE){
+		close_nvr();
+	}
+	return i;
+}
+
+/****************
+ * rw16_nvr sends word-rw cmd to the NVRAM
+ *
+ * Supports same modes as rw8_nvr()
+ */
+U16 rw16_nvr(U32 addr, U16 dataw, U8 mode)
+{
+	U8	i = 0;		// temp
+	U16	ii;
+
+	if(mode & CS_WRITE){
+		i = (U8)dataw;
+	}
+	ii = (U16)rw8_nvr(addr, i, (mode&(CS_WRITE | CS_OPEN)) );
+	if(mode & CS_WRITE) i = (U8)(dataw >> 8);
+	ii |= ((U16)rw8_nvr(addr+1, i, mode & CS_CLOSE)) << 8;
+	return ii;
+}
+
+/****************
+ * rw32_nvr sends wword-rw cmd to the NVRAM
+ *
+ * Supports same modes as rw8_nvr()
+ */
+U32 rw32_nvr(U32 addr, U32 dataw, U8 mode)
+{
+	U8	i = 0;		// temp
+//	U8	j;
+	U32	ii;
+	U32	jj = dataw;
+
+	// first (low) byte:
+	if(mode & CS_WRITE){
+		i = (U8)jj;
+	}
+	ii = (U32)rw8_nvr(addr, i, (mode&(CS_WRITE | CS_OPEN)) );
+	// 2nd byte:
+	if(mode & CS_WRITE){
+		jj >>= 8;
+		i = (U8)jj;
+	}
+	ii |= (U32)rw8_nvr(addr+1, i, (mode&(CS_WRITE)) ) << 8;
+	// 3rd byte:
+	if(mode & CS_WRITE){
+		jj >>= 8;
+		i = (U8)jj;
+	}
+	ii |= (U32)rw8_nvr(addr+2, i, (mode&(CS_WRITE)) ) << 16;
+	// 4th (hi) byte:
+	if(mode & CS_WRITE){
+		jj >>= 8;
+		i = (U8)jj;
+	}
+	ii |= (U32)rw8_nvr(addr+3, i, (mode&(CS_WRITE | CS_CLOSE)) ) << 24;
+
+	return ii;
+}
+
+/****************
+ * rwusn_nvr r/w NVRAM user seria#
+ *
+ */
+U16 rwusn_nvr(U16 dataw, U8 mode)
+{
+	U16	ii;
+
+	open_nvr();
+	if(mode&CS_WRITE) shift_spi(WRSNR);
+	else shift_spi(RDSNR);
+	ii = rw16_nvr(0, dataw, (mode&CS_WRITE));
+	close_nvr();
+	return ii;
+}
+
 //-----------------------------------------------------------------------------
 // Timer1B_ISR() drives bit-bang SPI
 //-----------------------------------------------------------------------------
@@ -236,7 +380,10 @@ void wen_nvr(void)
 void Timer1B_ISR(void)
 {
 
+	// clear ISR flags
+	TIMER1_ICR_R = TIMER1_MIS_R & TIMER_MIS_BMASK;
 	// set flag to trigger bit
 	ssiflag = 1;
 	return;
 }
+

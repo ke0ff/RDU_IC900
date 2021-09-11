@@ -57,8 +57,8 @@ enum err_enum{ no_response, no_device, target_timeout };
 // enum list of command numerics
 //	each enum corresponds to a command from the above list (lastcmd corresponds
 //	with the last entry, 0xff)
-const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0U\0TI\0T\0?\0H\0VERS\0\xff"};
-enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,tstuart1,timer_tst,
+const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0NR\0NW\0NC\0U\0TI\0T\0?\0H\0VERS\0\xff"};
+enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,nvrd,nvwr,nvcmd,tstuart1,timer_tst,
 			   trig_la,help1,help2,vers,lastcmd,helpcmd };
 
 #define	cmd_type	char	// define as char for list < 255, else define as int
@@ -155,7 +155,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 	char	pc = FALSE;				// C flag (set if "C" found in args)
 	char	pw = FALSE;				// W flag (set if "W" found in args)
 	char	px = FALSE;				// X flag (set if "X" found in args)
-//	char	pm = FALSE;				// minus flag (set if <wsp>-<wsp> found in args)
+	char	ps = FALSE;				// s flag (set if <wsp>S<wsp> found in args)
 	char	pv = FALSE;				// V flag (set if <wsp>V<wsp> found in args)
 	int		cmd_found = TRUE;		// default to true, set to false if no valid cmd identified
 //	char*	q;						// char temp pointer
@@ -173,7 +173,6 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 	S8		si;						// temp s
 	S8		sj;
 	U16		k;						// U16 temp
-//	U16		jj;						// U16 temp
 	U16		kk;						// U16 temp
 //	U16		hh;						// U16 temp
 	U16		adc_buf[8];				// adc buffer
@@ -206,11 +205,11 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 				do_cmd_help(cmd_id);											// do help for cmd only
 			}
 		}else{
-//			c = parm_srch(nargs, args, "-/");									// capture minus floater
-//			if(c){
-//				pm = TRUE;
-//				nargs--;
-//			}
+			c = parm_srch(nargs, args, "-S");									// capture minus floater
+			if(c){
+				ps = TRUE;
+				nargs--;
+			}
 			c = parm_srch(nargs, args, "-V");									// capture v-flag floater
 			if(c){
 				pv = TRUE;
@@ -294,6 +293,81 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 								}
 							}
 						}while(bchar != ESC);
+					}
+					break;
+
+				case nvrd:
+					params[0] = 0;
+					params[1] = 0;
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					if(params[1] > params[0]){
+						j = CS_OPEN;
+						putssQ("NVRD:");
+						l = 0;
+						for(ii=(U32)params[0]; ii<(U32)params[1]+1; ii++){
+							if(ii == params[1]) j = CS_CLOSE;
+							i = rw8_nvr(ii, 0, j);
+							j = 0;
+							if(l == 0){
+								sprintf(obuf,"\n%05x: %02x",ii, i);
+								putssQ(obuf);
+								l = 7;
+							}else{
+								sprintf(obuf," %02x", i);
+								putssQ(obuf);
+								l--;
+							}
+						}
+						putsQ("\n");
+					}else{
+						i = rw8_nvr((U32)params[0], 0, CS_OPENCLOSE);
+						sprintf(obuf,"NVRD: %05x: %02x",(U32)params[0], i);
+						putsQ(obuf);
+					}
+					break;
+
+				case nvwr:
+					params[0] = 0;
+					params[1] = 0;
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					if(px){
+						putssQ("NV descending fill...");
+						i = 0xff;
+						j = CS_WRITE | CS_OPEN;
+						for(ii=(U32)params[0]; ii<(U32)params[1]+1; ii++){
+							if(ii == params[1]) j = CS_WRITE | CS_CLOSE;
+							rw8_nvr(ii, i, j);
+							j = CS_WRITE;
+							if(l == 0){
+								putssQ(".");
+								l = 7;
+							}else{
+								l--;
+							}
+						}
+						putsQ("\n");
+					}else{
+						rw8_nvr((U32)params[0], (U8)params[1], CS_WRITE|CS_OPENCLOSE);
+						i = rw8_nvr((U32)params[0], 0, CS_OPENCLOSE);
+						sprintf(obuf,"NVWR: %05x: %02x",(U32)params[0], i);
+						putsQ(obuf);
+					}
+					break;
+
+				case nvcmd:
+					if(pc){
+						wen_nvr();
+						putsQ("enable NV writes");
+					}
+					if(ps){
+						i = 0;
+						if(pw) i = CS_WRITE;
+						params[0] = 0;
+						get_Dargs(1, nargs, args, params);						// parse param numerics into params[] array
+						rws_nvr((U32)params[0], i);
+						i = rws_nvr(0, 0);
+						sprintf(obuf,"NV Status: %02x", i);
+						putsQ(obuf);
 					}
 					break;
 
@@ -511,14 +585,14 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					k = 0;
 					do{
 						if(j == 0){
-							putsQ("SAMP#, FAN RPM, TA, TH, TJ, IM, PF, PR");	// put up banner every 50 lines
+							putsQ("SAMP#, FAN Rps, TA, TH, TJ, IM, PF, PR");	// put up banner every 50 lines
 							j = 50;
 						}
 						j -= 1;
 						k += 1;
 						ii = 0;
 						fa = 30.0 * (float)SYSCLK / (float)ii;
-						sprintf(obuf,"%u, %.0f,",k, fa);						// samp#, fan rpm
+						sprintf(obuf,"%u, %.0f,",k, fa);						// samp#, fan rps
 						putsQ(obuf);
 						fa = get_temp(0, i);
 						sprintf(obuf," %.4f,",fa);								// TA

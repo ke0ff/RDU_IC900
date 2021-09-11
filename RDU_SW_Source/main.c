@@ -29,6 +29,9 @@
  *
  *
  *    Project scope rev History:
+ *    09-11-21 jmh:	 NVRAM test successful.  Added CLI debug commands.
+ *    				 replaced IC2 on LCD board to correct wonky segments in sub-band freq display.  So far, so good...
+ *					 Transferred HIB storage to NVRAM & debug (round 1)
  *    09-09-21 jmh:	 Incorporated NVRAM mod (revA of the schem, dated 9/09/21 or later).  Connects a 1Mb auto-store SPI NVRAM
  *    					to the SPI port.  Use this instead of HIB and EEPROM to store NV data.  Requires bit-bang SPI because
  *    					there are no SSIRX I/O pins available without significantly upsetting the GPIO map.
@@ -186,6 +189,7 @@
 #include "eeprom.h"
 #include "lcd.h"
 #include "radio.h"
+#include "spi.h"
 //#include "encoder.h"
 
 //-----------------------------------------------------------------------------

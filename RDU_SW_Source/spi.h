@@ -29,6 +29,7 @@
 #define	CS_CLOSE		2
 #define	CS_OPENCLOSE	(CS_OPEN | CS_CLOSE)
 #define	CS_IDLE			0
+#define	CS_WRITE		0x80
 
 // BUSY WAIT TIMEOUT
 #define	BUSY_WAT	5					// max delay to wait for UART2 TX to clear (ms)
@@ -53,7 +54,7 @@
 #define	STORE		0x08				// store memory to NV space command (1 byte)
 #define	RECALL		0x09				// recall memory from NV space command (1 byte)
 #define	RDSNR		0xC3				// read user sernum command (1 byte, 2 bytes read)
-#define	WRSNT		0xC2				// write user sernum command (1 byte, 2 bytes write)
+#define	WRSNR		0xC2				// write user sernum command (1 byte, 2 bytes write)
 #define	NVHIBR		0xB9				// NVRAM hibernate command (1 byte)
 
 //-----------------------------------------------------------------------------
@@ -69,6 +70,13 @@ void spi1_clean(void);
 void lcd_cmd(U8 cmd);
 void send_so(uint32_t data);
 // NVRAM Fns
+void close_nvr(void);
 void wen_nvr(void);
+void storecall_nvr(U8 tf_fl);
+U8 rws_nvr(U8 dataw, U8 mode);
+U8 rw8_nvr(U32 addr, U8 dataw, U8 mode);
+U16 rw16_nvr(U32 addr, U16 dataw, U8 mode);
+U32 rw32_nvr(U32 addr, U32 dataw, U8 mode);
+U16 rwusn_nvr(U16 dataw, U8 mode);
 
 #endif /* SPI_H_ */

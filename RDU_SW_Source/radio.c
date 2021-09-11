@@ -50,6 +50,7 @@
 #include "lcd.h"
 #include "uxpll.h"
 #include "serial.h"
+#include "spi.h"
 
 //-----------------------------------------------------------------------------
 // local declarations
@@ -160,16 +161,16 @@ U32 init_radio(void){
 		wait(10);
 	}
 	// validate NVRAM CRC...
-	crctmp = ((U16)rdhib_ram(CRC_HIB_ADDR)) << 8;
-	crctmp |= ((U16)rdhib_ram(CRC_HIB_ADDR + 1));
-	crctmp2 = crc_hib();
-	if(crctmp2 != crctmp){
+//	crctmp = ((U16)rdhib_ram(CRC_HIB_ADDR)) << 8;
+//	crctmp |= ((U16)rdhib_ram(CRC_HIB_ADDR + 1));
+//	crctmp2 = crc_hib();
+//	if(crctmp2 != crctmp){
 		// CRC fail, stored VFO data corrupt: re-initialize...
 		putsQ("HIBCRCfail");						// display error msg to console
 		bandid_m = ID2M_IDX;	//!!! need to choose lowest 2 present modules
 		bandid_s = ID440_IDX;
 
-		for(i=ID10M_IDX; i<=ID1200_IDX; i++){
+		for(i=ID10M_IDX; i<NUM_VFOS; i++){
 			dplx[i] = DPLX_S | LOHI_F;				// duplex = S & low power
 			ctcss[i] = 0x1a;						// PL setting = 162.2
 			sq[i] = LEVEL_MAX-6;					// SQ setting
@@ -202,10 +203,12 @@ U32 init_radio(void){
 //		get_lohi(MAIN, 1);
 //		get_lohi(SUB, 1);
 
-	}else{
+//	}else{
 		// CRC good, recall NVRAM data
-		recall_vfo();
-	}
+//		recall_vfo();
+//	}
+
+	recall_vfo();
 //	ux_present_flags = 0x3f; //!!! force all modules on for debug
 	update_radio_all();								// force radio update
 	return 0;
@@ -428,36 +431,79 @@ void  process_SOUT(U8 cmd){
 // save_vfo() copies VFO/offset to HIB RAM (non-volatile)
 //	call this fn anytime something changes in a VFO
 //-----------------------------------------------------------------------------
-void  save_vfo(void){
+void  save_vfo(U8 b_id){
 	U8	i;
-	U8	j;
+	U32	j;
+	U8	k;
+	U8	startid;
+	U8	stopid;
 
+	if(b_id == 0xff){
+		startid = 0;
+		stopid = NUM_VFOS;
+	}else{
+		startid = b_id;
+		stopid = b_id;
+	}
 	// combine VFO/offset into single 32 bit value
-	for(i=0, j=0; i<LEN_VFO_ARY; i++, j++){
-		wrwhib_ram(vfo[i]/5 | ((offs[i]/5) << 18), j);	// store composite VFO/offs
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=VFO_0; i<stopid; i++, j+=sizeof(U32)){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw32_nvr(j, vfo[i], k);
+		k = CS_WRITE;
 	}
-	j *= 4;										// convert word addr to byte addr
-	for(i=0; i<LEN_ARY; i++, j++){				// these are byte values and don't require muxing (a simple compression method)
-		wrhib_ram(dplx[i], j);
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=OFFS_0; i<stopid; i++, j+=sizeof(U16)){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw16_nvr(j, offs[i], k);
+		k = CS_WRITE;
 	}
-	for(i=0; i<LEN_ARY; i++, j++){
-		wrhib_ram(ctcss[i], j);
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=DPLX_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw8_nvr(j, dplx[i], k);
+		k = CS_WRITE;
 	}
-	for(i=0; i<LEN_ARY; i++, j++){
-		wrhib_ram(sq[i], j);
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=CTCSS_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw8_nvr(j, ctcss[i], k);
+		k = CS_WRITE;
 	}
-	for(i=0; i<LEN_ARY; i++, j++){				// tsa and tsb are mux'd
-		wrhib_ram((tsa[i] & 0x0f) | (tsb[i] << 4), j);
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=TSA_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw8_nvr(j, tsa[i], k);
+		k = CS_WRITE;
 	}
-	for(i=0; i<LEN_ARY; i++, j++){
-		wrhib_ram(mem[i], j);
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=TSB_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw8_nvr(j, tsb[i], k);
+		k = CS_WRITE;
 	}
-	wrhib_ram(vol[bandid_m], j++);				// save main vol
-	wrhib_ram(vol[bandid_s], j++);				// save sub vol
-	i = bandid_m | (bandid_s << 4);				// mux bandid main and sub
-	wrhib_ram(i, j++);
-	i = ux129_xit | (ux129_rit << 4);			// mux xit and rit
-	wrhib_ram(i, j);
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=SQ_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw8_nvr(j, sq[i], k);
+		k = CS_WRITE;
+	}
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=VOL_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw8_nvr(j, vol[i], k);
+		k = CS_WRITE;
+	}
+	k = CS_WRITE | CS_OPEN;
+	for(i=startid, j=MEM_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+		rw8_nvr(j, mem[i], k);
+		k = CS_WRITE;
+	}
+	rw8_nvr(XIT_0, ux129_xit, CS_WRITE | CS_OPEN);
+	rw8_nvr(RIT_0, ux129_rit, CS_WRITE);
+	rw8_nvr(BIDM_0, bandid_m, CS_WRITE);
+	rw8_nvr(BIDS_0, bandid_s, CS_WRITE | CS_CLOSE);
 	return;
 }
 
@@ -466,16 +512,85 @@ void  save_vfo(void){
 //	call this fn on power-up
 //-----------------------------------------------------------------------------
 void  recall_vfo(void){
-	U8	i;		// band array index & temp
+	U8	i;
+	U32	j;
+	U8	k;
+	U8	startid;
+	U8	stopid;
+
+	startid = 0;
+	stopid = NUM_VFOS;
+	k = CS_OPEN;
+	for(i=startid, j=VFO_0; i<stopid; i++, j+=sizeof(U32)){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		vfo[i] = rw32_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=OFFS_0; i<stopid; i++, j+=sizeof(U16)){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		offs[i] = rw16_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=DPLX_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		dplx[i] = rw8_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=CTCSS_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		ctcss[i] = rw8_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=TSA_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		tsa[i] = rw8_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=TSB_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		tsb[i] = rw8_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=SQ_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		sq[i] = rw8_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=VOL_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		vol[i] = rw8_nvr(j, 0, k);
+		k = CS_IDLE;
+	}
+	k = CS_OPEN;
+	for(i=startid, j=MEM_0; i<stopid; i++, j++){
+		if(i == (stopid - 1)) k = CS_CLOSE;
+		mem[i] = rw8_nvr(j, mem[i], k);
+		k = CS_IDLE;
+	}
+	ux129_xit = rw8_nvr(XIT_0, 0, CS_OPEN);
+	ux129_rit = rw8_nvr(RIT_0, 0, CS_IDLE);
+	bandid_m = rw8_nvr(BIDM_0, 0, CS_IDLE);
+	bandid_s = rw8_nvr(BIDS_0, 0, CS_CLOSE);
+
+
+
+/*	U8	i;		// band array index & temp
 	U8	j;		// ram addr
 	U8	k;		// temps
 	U32	ii;
 
 	for(i=0, j=0; i<LEN_VFO_ARY; j++, i++){		// expand out VFO/OFFS
-/*		for(k=0; k<4; k++, j++){
-			ii <<= 4;
-			ii = rdhib_ram(j);
-		}*/
+//		for(k=0; k<4; k++, j++){
+//			ii <<= 4;
+//			ii = rdhib_ram(j);
+//		}
 		ii = rdwhib_ram(j);
 		vfo[i] = (ii & 0x3ffff) * 5;
 		offs[i] = (ii >> 18) * 5;
@@ -509,7 +624,7 @@ void  recall_vfo(void){
 	vol[bandid_s] = i;							// ... store nvram sub vol to (new) sub band
 	k = rdhib_ram(j);							// bandids
 	ux129_xit = k & 0x0f;						// break out xit/rit
-	ux129_rit = k >> 4;
+	ux129_rit = k >> 4;*/
 	return;
 }
 
@@ -595,12 +710,12 @@ U16 calcrc(U8 c, U16 oldcrc){
 //	the crc to the hib.
 //-----------------------------------------------------------------------------
 void push_vfo(void){
-	U16	crctmp;
+//	U16	crctmp;
 
-	save_vfo();											// save the vfo data structure to NVRAM
-	crctmp = crc_hib();									// calculate the CRC
-	wrhib_ram((U8)(crctmp >> 8), CRC_HIB_ADDR);			// and store to the last 2 bytes of the HIB (NVRAM)
-	wrhib_ram((U8)(crctmp & 0xff), CRC_HIB_ADDR+1);
+	save_vfo(0xff);										// save the vfo data structure to NVRAM
+//	crctmp = crc_hib();									// calculate the CRC
+//	wrhib_ram((U8)(crctmp >> 8), CRC_HIB_ADDR);			// and store to the last 2 bytes of the HIB (NVRAM)
+//	wrhib_ram((U8)(crctmp & 0xff), CRC_HIB_ADDR+1);
 	return;
 }
 
@@ -1134,7 +1249,7 @@ U8 inc_dplx(U8 main){
 
     if(main) i = bandid_m;						// select duplex to modify
     else i = bandid_s;
-    dplx[i] += 1;								// increment to next duplex ordinal
+    dplx[i] += DPLX_P;							// increment to next duplex ordinal
     if((dplx[i] & (DPLX_P|DPLX_M)) == (DPLX_P|DPLX_M)){
     	dplx[i] &= ~(DPLX_P|DPLX_M);			// roll over duplex
     }
