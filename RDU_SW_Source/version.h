@@ -29,5 +29,6 @@ const S8    date_code[]      = {"06-Aug-2021"};
 //-----------------------------------------------------------------------------
 void dispSWvers(void);
 void ccmdSWvers(char* sbuf);
+U16 nvram_sn(void);
 
 #define VERSION_INCLUDED

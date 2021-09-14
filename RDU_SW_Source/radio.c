@@ -51,6 +51,7 @@
 #include "uxpll.h"
 #include "serial.h"
 #include "spi.h"
+#include "version.h"
 
 //-----------------------------------------------------------------------------
 // local declarations
@@ -75,7 +76,10 @@ U8	tsa[NUM_VFOS];						// frq step "A" setting
 U8	tsb[NUM_VFOS];						// frq step "B" setting
 U8	sq[NUM_VFOS];							// SQ setting
 U8	vol[NUM_VFOS];						// VOL setting
-U8	mem[NUM_VFOS];						// mem# setting - an ASCII character that maps to an ordinal offset
+U8	mem[NUM_VFOS];						// mem# setting - an ordinal offset that maps to an ASCII character
+U8	call[NUM_VFOS];						// call-mem# setting - an ordinal offset that maps to an ASCII character
+U8	bflags[NUM_VFOS];					// expansion flags
+U8	scanflags[NUM_VFOS];				// scan flags (expansion)
 
 U8	ux129_xit;							// XIT setting (UX-129) - 4-bit signed nybble (+7/-8)
 U8	ux129_rit;							// RIT setting (UX-129) - 4-bit signed nybble (+7/-8)
@@ -87,12 +91,23 @@ U32	vfotr;								// tr vfo
 U32	mhz_step;							// mhz digit add value - tracks the digit index in the thumbwheel digit adjust mode
 U8	mute_band;							// flags to control audio mute function for main/sub (mirror of lcd.c mute_mode)
 
+// TX upper frequency limits for each band
+U32	vfo_tulim[ID1200];
+// TX lower frequency limits for each band
+U32	vfo_tllim[ID1200];
+
 // upper frequency limits for each band
 U32	vfo_ulim[] = { 40000L, 60000L, 170000L, 228000L, 470000L, 1310000L };
 // lower frequency limits for each band
 U32	vfo_llim[] = { 27000L, 45000L, 130000L, 215000L, 420000L, 1200000L };
 // upper TX offset frequency limits for each band (lower limit is zero for all bands)
 U32	offs_ulim[] = { 13000L, 15000L, 40000L, 13000L, 50000L, 900000L };
+// Mem NVRAM base address table
+U32 mem_band[] = { ID10M_MEM, ID6M_MEM, ID2M_MEM, ID220_MEM, ID440_MEM, ID1200_MEM };
+//U32 mem_band[1] = { ID10M_MEM };
+// mem name strings
+char memname_m[MEM_NAME_LEN];
+char memname_s[MEM_NAME_LEN];
 
 // **************************************************************
 
@@ -135,8 +150,9 @@ U8 get_busy(void);
 U32 init_radio(void){
 	U8	i;
 	U8	j;
-	U16	crctmp;
-	U16	crctmp2;
+	U8	k;
+	U16	ii;
+	U8	usnbuf[16];		// User SN buffer
 //	char	ibuf[25];	// sprintf/putsQ debug patch !!!
 
 	wait(100);
@@ -160,24 +176,42 @@ U32 init_radio(void){
 		send_so(so_initc[i]);						// into a known (if not relevant) state
 		wait(10);
 	}
-	// validate NVRAM CRC...
-//	crctmp = ((U16)rdhib_ram(CRC_HIB_ADDR)) << 8;
-//	crctmp |= ((U16)rdhib_ram(CRC_HIB_ADDR + 1));
-//	crctmp2 = crc_hib();
-//	if(crctmp2 != crctmp){
-		// CRC fail, stored VFO data corrupt: re-initialize...
-		putsQ("HIBCRCfail");						// display error msg to console
-		bandid_m = ID2M_IDX;	//!!! need to choose lowest 2 present modules
-		bandid_s = ID440_IDX;
+	// recall vfo NV data
+	recall_vfo();
+	// validate VFOs to validate NVRAM contents
+	k = TRUE;
+	for(i=ID10M_IDX; i<ID1200; i++){
+		if(vfo[i] > vfo_ulim[i]) k = FALSE;			// if VFO is out of limit, invalidate the NVRAM
+		if(vfo[i] < vfo_llim[i]) k = FALSE;
+	}
+	if(!k) putsQ("NVRAMfail");						// display error msg to console
+	rwusn_nvr(usnbuf, 0);
+	ii = (U16)usnbuf[14];
+	ii |= ((U16)usnbuf[15]) << 8;
+	if(ii != nvram_sn()){
+		// if version SN incorrect, invalidate NVRAM
+		// future versions may call a "fixit" fn that updates an
+		// out-of-version NVRAM without deleting the existing config.
+		k = FALSE;
+		putsQ("USNfail");							// display error msg to console
+	}
+	if(!k){
+		// Validation fail, stored VFO data corrupt: re-initialize...
+		putsQ("Initializing VFOS...");				// display status msg to console
 
 		for(i=ID10M_IDX; i<NUM_VFOS; i++){
 			dplx[i] = DPLX_S | LOHI_F;				// duplex = S & low power
-			ctcss[i] = 0x1a;						// PL setting = 162.2
+			ctcss[i] = 0x0c;						// PL setting = 100.0
 			sq[i] = LEVEL_MAX-6;					// SQ setting
 			vol[i] = 20;							// vol setting
 			tsa[i] = 1;								// tsa/b defaults
 			tsb[i] = 2;
-			mem[i] = '0';
+			mem[i] = 0;
+			call[i] = CALL_MEM;
+			bflags[i] = 0xff;						// expansion flags
+			scanflags[i] = 0xff;					// scan flags (expansion)
+			vfo_tulim[i] = vfo_ulim[i];				// copy RX limits to TX
+			vfo_tllim[i] = vfo_llim[i];
 		}
 		vfo[ID10M_IDX] = 29100L;					// each band has a unique initial freq
 		vfo[ID6M_IDX] = 52525L;
@@ -193,7 +227,23 @@ U32 init_radio(void){
 		offs[ID1200_IDX] = 20000;
 		ux129_xit = 0;								// X/RIT settings
 		ux129_rit = 0;
+		// init mems
+		putsQ("Initializing MEMS...");				// display status msg to console
+		memname_m[0] = '\0';						// init mem names
+		memname_s[0] = '\0';
 		push_vfo();									// push new data vfo to nvram (hib)
+		// copy default VFOs to memory space
+		for(bandid_m=ID10M_IDX; bandid_m<ID1200; bandid_m++){
+			for(i=0; i<NUM_MEMS; i++){
+				write_mem(i, MAIN);
+			}
+		}
+		bandid_m = BAND_ERROR;						// default to error, figure out assignment below...
+		bandid_s = BAND_ERROR;
+		ii = nvram_sn();
+		usnbuf[14] = (U8)ii;
+		usnbuf[15] = (U8)(ii >> 8);
+		rwusn_nvr(usnbuf, CS_WRITE);				// set version SN to validate version config
 
 // debug presets !!!
 //		ux129_xit = 0xaa;							// debug...XIT setting (UX-129)
@@ -202,13 +252,38 @@ U32 init_radio(void){
 //		ctcss[ID440_IDX] = 0x10;					// PL setting = 114.8
 //		get_lohi(MAIN, 1);
 //		get_lohi(SUB, 1);
+	}
+	putsQ("Validate selected module...");			// display status msg to console
+	// double-check band-ids for validity against installed hardware
+	if(bandid_m != BAND_ERROR){
+		if(!(set_bit(bandid_m) & ux_present_flags)) bandid_m = BAND_ERROR;		// set main invalid if not present
+	}
+	if(bandid_s != BAND_ERROR){
+		if(!(set_bit(bandid_s) & ux_present_flags)) bandid_s = BAND_ERROR;		// set sub invalid if not present
+	}
+	// re-assign active module if error
+	j = 0x01;										// start at lowest module
+	i = 0;
+	do{
+		if(j&ux_present_flags){						// pick first two modules present to be main/sub
+			if(bandid_m == BAND_ERROR){				// only try to assign if error
+				if(i != bandid_s) bandid_m = i;		// assign if not already taken by sub-band
+			}
+			else if(bandid_s == BAND_ERROR){		// only try to assign if error
+				if(i != bandid_m) bandid_s = i;		// assign if not already taken by main-band
+			}
+		}
+		i++;
+		j <<= 1;
+	}while(j<=ID1200_B);
+	// if main band is error, copy up sub-band
+	if(bandid_m == BAND_ERROR){
+		bandid_m = bandid_s;
+		bandid_s = BAND_ERROR;
+	}
 
-//	}else{
-		// CRC good, recall NVRAM data
-//		recall_vfo();
-//	}
-
-	recall_vfo();
+//		bandid_m = ID2M_IDX;	//!!! need to choose lowest 2 present modules
+//		bandid_s = ID440_IDX;
 //	ux_present_flags = 0x3f; //!!! force all modules on for debug
 	update_radio_all();								// force radio update
 	return 0;
@@ -322,6 +397,7 @@ void  process_SOUT(U8 cmd){
 						pll_ptr = 0;
 						sout_flags &= ~SOUT_VFOM_F;										// clear the signal
 						set_vfo_display(MAIN);											// send disp update signal
+						save_vfo(bandid_m);												// save affected VFO
 						break;
 
 					case SOUT_VFOS_N:
@@ -329,6 +405,7 @@ void  process_SOUT(U8 cmd){
 						pll_ptr = 0;
 						sout_flags &= ~SOUT_VFOS_F;
 						set_vfo_display(SUB_D);											// send disp update signal
+						save_vfo(bandid_s);												// save affected VFO
 						break;
 
 					case SOUT_MVOL_N:													// process VOL/SQU triggers...
@@ -428,8 +505,10 @@ void  process_SOUT(U8 cmd){
 }
 
 //-----------------------------------------------------------------------------
-// save_vfo() copies VFO/offset to HIB RAM (non-volatile)
+// save_vfo() copies VFO/offset to NVRAM
 //	call this fn anytime something changes in a VFO
+//	b_id == 0xff, saves all
+//	else, only save one indexed dataset
 //-----------------------------------------------------------------------------
 void  save_vfo(U8 b_id){
 	U8	i;
@@ -443,62 +522,25 @@ void  save_vfo(U8 b_id){
 		stopid = NUM_VFOS;
 	}else{
 		startid = b_id;
-		stopid = b_id;
+		stopid = b_id + 1;
 	}
 	// combine VFO/offset into single 32 bit value
 	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=VFO_0; i<stopid; i++, j+=sizeof(U32)){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
-		rw32_nvr(j, vfo[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=OFFS_0; i<stopid; i++, j+=sizeof(U16)){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
-		rw16_nvr(j, offs[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=DPLX_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
-		rw8_nvr(j, dplx[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=CTCSS_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
+	for(i=startid, j=VFO_0 + (VFO_LEN * startid); i<stopid; i++){
+		rw32_nvr(j, vfo[i], k);							// write each element of the band state in sequence
+		k = CS_WRITE;									// the addr (j) only matters for first call in an "OPEN" sequence.  So...
+		rw16_nvr(j, offs[i], k);						// we don't update it here (the NVRAM increments it automatically).  Saves
+		rw8_nvr(j, dplx[i], k);							// a lot of SPI clock cycles.
 		rw8_nvr(j, ctcss[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=TSA_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
 		rw8_nvr(j, tsa[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=TSB_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
 		rw8_nvr(j, tsb[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=SQ_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
 		rw8_nvr(j, sq[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=VOL_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
 		rw8_nvr(j, vol[i], k);
-		k = CS_WRITE;
-	}
-	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=MEM_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_WRITE | CS_CLOSE;
 		rw8_nvr(j, mem[i], k);
-		k = CS_WRITE;
+		rw8_nvr(j, call[i], k);
+		rw8_nvr(j, bflags[i], k);
+		if(i == (stopid - 1)) k |= CS_CLOSE;
+		rw8_nvr(j, scanflags[i], k);
 	}
 	rw8_nvr(XIT_0, ux129_xit, CS_WRITE | CS_OPEN);
 	rw8_nvr(RIT_0, ux129_rit, CS_WRITE);
@@ -508,7 +550,7 @@ void  save_vfo(U8 b_id){
 }
 
 //-----------------------------------------------------------------------------
-// recall_vfo() copies HIB RAM to VFO struct
+// recall_vfo() copies NVRAM to VFO struct
 //	call this fn on power-up
 //-----------------------------------------------------------------------------
 void  recall_vfo(void){
@@ -521,58 +563,21 @@ void  recall_vfo(void){
 	startid = 0;
 	stopid = NUM_VFOS;
 	k = CS_OPEN;
-	for(i=startid, j=VFO_0; i<stopid; i++, j+=sizeof(U32)){
-		if(i == (stopid - 1)) k = CS_CLOSE;
+	for(i=startid, j=VFO_0; i<stopid; i++){
 		vfo[i] = rw32_nvr(j, 0, k);
 		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=OFFS_0; i<stopid; i++, j+=sizeof(U16)){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		offs[i] = rw16_nvr(j, 0, k);
-		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=DPLX_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		dplx[i] = rw8_nvr(j, 0, k);
-		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=CTCSS_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		ctcss[i] = rw8_nvr(j, 0, k);
-		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=TSA_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		tsa[i] = rw8_nvr(j, 0, k);
-		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=TSB_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		tsb[i] = rw8_nvr(j, 0, k);
-		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=SQ_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		sq[i] = rw8_nvr(j, 0, k);
-		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=VOL_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		vol[i] = rw8_nvr(j, 0, k);
-		k = CS_IDLE;
-	}
-	k = CS_OPEN;
-	for(i=startid, j=MEM_0; i<stopid; i++, j++){
-		if(i == (stopid - 1)) k = CS_CLOSE;
 		mem[i] = rw8_nvr(j, mem[i], k);
-		k = CS_IDLE;
+		call[i] = rw8_nvr(j, 0, k);
+		bflags[i] = rw8_nvr(j, 0, k);
+		if(i == (stopid - 1)) k |= CS_CLOSE;
+		scanflags[i] = rw8_nvr(j, 0, k);
 	}
 	ux129_xit = rw8_nvr(XIT_0, 0, CS_OPEN);
 	ux129_rit = rw8_nvr(RIT_0, 0, CS_IDLE);
@@ -1485,19 +1490,61 @@ U32 get_vfot(void){
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-// get_memnum() returns mem# for main or sub band
+// get_memnum() adds "adder" and then returns mem# for main or sub band
 //-----------------------------------------------------------------------------
-U8 get_memnum(U8 main){
+U8 get_memnum(U8 main, U8 adder){
 	U8	i;
 
-	if(main == MAIN) i = mem[bandid_m];
-	else i = mem[bandid_s];
+	if(main == MAIN){
+		if(mem[bandid_m] < MAX_MEM){
+			mem[bandid_m] += adder;
+			if(mem[bandid_m] > 0x80) mem[bandid_m] = MAX_MEM - 1;
+			if(mem[bandid_m] >= MAX_MEM) mem[bandid_m] = 0;
+		}
+		i = mem[bandid_m];
+	}else{
+		if(mem[bandid_s] < MAX_MEM){
+			mem[bandid_s] += adder;
+			if(mem[bandid_s] > 0x80) mem[bandid_s] = MAX_MEM - 1;
+			if(mem[bandid_s] >= MAX_MEM) mem[bandid_s] = 0;
+		}
+		i = mem[bandid_s];
+	}
 	return i;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-// is_mic_updn() returns current RF power setting if param is 0xff
+// get_callnum() adds "adder" and then returns mem# for main or sub band
+//-----------------------------------------------------------------------------
+U8 get_callnum(U8 main, U8 adder){
+	U8	i;
+
+	if(main == MAIN){
+		if((call[bandid_m] < MAX_MEM) || (call[bandid_m] >= NUM_MEMS)){
+			call[bandid_m] = CALL_MEM;
+		}else{
+			call[bandid_m] += adder;
+			if(call[bandid_m] >= NUM_MEMS) call[bandid_m] = CALL_MEM;
+			if(call[bandid_m] < CALL_MEM) call[bandid_m] = NUM_MEMS - 1;
+		}
+		i = call[bandid_m];
+	}else{
+		if((call[bandid_s] < MAX_MEM) || (call[bandid_s] >= NUM_MEMS)){
+			call[bandid_s] = CALL_MEM;
+		}else{
+			call[bandid_s] += adder;
+			if(call[bandid_s] >= NUM_MEMS) call[bandid_s] = CALL_MEM;
+			if(call[bandid_s] < CALL_MEM) call[bandid_s] = NUM_MEMS - 1;
+		}
+		i = call[bandid_s];
+	}
+	return i;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_lohi() returns current RF power setting if param is 0xff
 //	otherwise, sets or clears LOHI bit in the duplex register
 //-----------------------------------------------------------------------------
 U8 get_lohi(U8 main, U8 setread){
@@ -1616,6 +1663,24 @@ U8 set_bit(U8 value){
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
+// bit_set() takes bitmap of a (single) set bit in value
+//	and creates a count return
+//-----------------------------------------------------------------------------
+U8 bit_set(U8 value){
+	U8	i = 0;	// temps
+	U8	j;
+
+	if(!value) return 0xff;							// no bits set, error
+	j = 0x01;										// scan value for the first "1"
+	while(!(j & value) && j){
+		j <<= 1;
+		i++;
+	}												// i = 0 to 7
+	return i;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
 // set_offs() updates offset
 //-----------------------------------------------------------------------------
 void set_offs(U8 focus, U16 value){
@@ -1704,6 +1769,41 @@ void mute_radio(U8 mutefl){
 U8 get_mute_radio(void){
 
 	return mute_band;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// write_mem() writes the vfo state to the memory space
+//-----------------------------------------------------------------------------
+void write_mem(U8 memnum, U8 focus){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+	U32	addr;		// temps
+	U8	i;
+	U8	j;
+	U8	band;
+	char* cptr;
+
+	if(focus == MAIN) band = bandid_m;
+	else band = bandid_s;
+	addr = mem_band[band] + (memnum * MEM_LEN);
+	j = CS_WRITE;
+	rw32_nvr(addr, vfo[band], j|CS_OPEN);
+	rw16_nvr(addr, offs[band], j);
+	rw8_nvr(addr, dplx[band], j);
+	rw8_nvr(addr, ctcss[band], j);
+	rw8_nvr(addr, sq[band], j);
+	rw8_nvr(addr, vol[band], j);
+	rw8_nvr(addr, ux129_xit, j);
+	rw8_nvr(addr, ux129_rit, j);
+	rw8_nvr(addr, band, j);
+	if(focus == MAIN) cptr = memname_m;
+	else cptr = memname_s;
+	for(i=0; i<MEM_NAME_LEN; i++){
+		if(i == (MEM_NAME_LEN - 1)) j |= CS_CLOSE;
+		rw8_nvr(addr, *cptr++, j);
+	}
+	return;
 }
 
 // end radio.c

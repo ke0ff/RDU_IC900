@@ -61,12 +61,15 @@ U8	lcd_qv_lsd[5][3] = {													// list of 5 7-seg ordinal patterns
 // TS ordinal sequence.  A list of step sizes [B:A]
 U8	ts_order[3] = { 0x21, 0x51, 0x52 };
 
-// List of supported CTCSS tones, in Hz * 10:
+// List of supported CTCSS tones, in Hz * 10.  1st tone is #1, last is #38:
 U16	tone_list[] = {  670,  719,  744,  770,  797,  825,  854,  885,
 					 915,  948,  974, 1000, 1035, 1072, 1109, 1148,
 					1188, 1230, 1273, 1318, 1365, 1413, 1462, 1514,
 					1567, 1622, 1679, 1738, 1799, 1862, 1928, 2035,
 					2107, 2181, 2257, 2336, 2418, 2503 };
+
+// Mem ordinals         0         0123456789012345678901234
+char mem_ordinal[] = { "0123456789ABDEFGHJKLMNPRSTUWYZ()[]" };
 
 #define	LCD_BUFLEN 23
 U8	lcd_buf[LCD_BUFLEN];			// LCD comm message buffer
@@ -89,7 +92,7 @@ void lamp_test(U8 tf);
 void update_lcd(void);
 U8 process_MS(U8 cmd);
 U8 test_for_cancel(U8 key);
-void process_DIAL(U8 focus);
+U32 process_DIAL(U8 focus);
 U8 process_MEM(U8 cmd);
 U8 process_SET(U8 cmd);
 void ats(U8 tf);
@@ -208,9 +211,9 @@ void process_UI(U8 cmd){
 			break;
 
 		// Memory mode process
-		case MEM_MODE:
+//		case MEM_MODE:
 //			mode_rtn = process_MEM(mode);
-			break;
+//			break;
 		}
 		//**************************************
 		// update the display when there are mode changes
@@ -228,9 +231,9 @@ void process_UI(U8 cmd){
 //				init_lcd_set();
 				break;
 
-			case MEM_MODE:
+//			case MEM_MODE:
 //				init_lcd_mem();
-				break;
+//				break;
 			}
 			mode = mode_rtn;
 		}
@@ -241,10 +244,12 @@ void process_UI(U8 cmd){
 			i = GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);						// capture DIM/LOCK switch settings
 			if(i ^ sw_stat){												// if changes..
 				if(i & DIM){
-			        set_pwm(5, 90);											// process bright settings (!!! these need to be configurable in SET loop)
-			        set_pwm(6, 90);
+					// process bright settings (!!! these need to be configurable in SET loop)
+					set_pwm(5, 99);											// LEDs
+			        set_pwm(6, 90);											// LCDBL
 				}else{
-			        set_pwm(5, 30);											// process DIM settings (!!! these need to be configurable in SET loop)
+					// process DIM settings (!!! these need to be configurable in SET loop)
+					set_pwm(5, 60);
 			        set_pwm(6, 30);
 				}
 				if(i & MISO_LOCK){
@@ -352,6 +357,10 @@ U8 process_MS(U8 mode){
 		iflags |= read_sin_flags(0);									// merge with radio.c variable
 		if(iflags){
 			// got changes...
+			if(iflags & SIN_SEND_F){
+				iflags |= SIN_MSRF_F;									// force update of MSRF
+				read_sin_flags(SIN_SEND_F);								// clear changes flag
+			}
 			sin_a0 = fetch_sin(0);										// update data
 			// check if squelch adjust
 			if(!(xmode & SQU_XFLAG)){
@@ -361,6 +370,11 @@ U8 process_MS(U8 mode){
 					i = (U8)(ii & 0x0f);
 					msmet(i>>1, 0);										// update glass
 					read_sin_flags(SIN_MSRF_F);							// clear changes flag
+					if(xmode & CALLM_XFLAG){
+						mmem(get_callnum(MAIN, 0));						// update call#
+					}else{
+						mmem(get_memnum(MAIN, 0));						// update mem#
+					}
 				}
 			}
 			// check if vol adjust
@@ -371,6 +385,11 @@ U8 process_MS(U8 mode){
 					i = (U8)(ii & 0x0f);
 					ssmet(i>>1, 0);										// update glass
 					read_sin_flags(SIN_SSRF_F);							// clear changes flag
+					if(xmode & CALLS_XFLAG){
+						smem(get_callnum(SUB, 0));						// update call#
+					}else{
+						smem(get_memnum(SUB, 0));						// update mem#
+					}
 				}
 			}
 			if(iflags & SIN_SQS_F){										// LED updates (MRX, MTX, SRX)
@@ -448,18 +467,18 @@ U8 process_MS(U8 mode){
 					putsQ(dgbuf);
 					if(vfo_display & MAIN){
 						if(vfo_display & VMODE_ISTX){
-							mfreq(get_freq(MAIN | VMODE_ISTX), 0, 0);		// update main freq display from vfotr
+							mfreq(get_freq(MAIN | VMODE_ISTX), 0, 0);	// update main freq display from vfotr
 							sprintf(dgbuf,"vfofrqT: %d",get_freq(band_focus | 0x80)); //!!!
 							putsQ(dgbuf);
 						}else{
-							mfreq(get_freq(MAIN), 0, 0);					// update main freq display
+							mfreq(get_freq(MAIN), 0, 0);				// update main freq display
 							sprintf(dgbuf,"vfofrqR: %d",get_freq(band_focus)); //!!!
 							putsQ(dgbuf);
 						}
 						vfo_display &= ~(VMODE_ISTX | MAIN);
 					}else{
 						if(vfo_display & SUB_D){
-							sfreq(get_freq(SUB), 0, 0);						// update sub freq display
+							sfreq(get_freq(SUB), 0, 0);					// update sub freq display
 							vfo_display &= ~(SUB_D);
 						}
 					}
@@ -469,7 +488,7 @@ U8 process_MS(U8 mode){
 		}
 		//**************************************
 		// process dial
-		process_DIAL(band_focus);										// process dial and mic up/dn changes
+		iflags |= process_DIAL(band_focus);								// process dial and mic up/dn changes
 		//**************************************
 		// process timeouts (MHz, xflag and SUB)
 		if(!mhz_time(0) && (maddr < MHZ_OFF)){							// process mhz digit timeout:
@@ -874,6 +893,56 @@ U8 process_MS(U8 mode){
 					}
 				}
 				break;
+
+			case MRchr:													// Mem-mode toggle: this toggles between mem and vfo mode
+				// if mem mode, turn off
+				if(band_focus == MAIN){
+					if(xmode & CALLM_XFLAG) xmode &= ~(CALLM_XFLAG|MEMM_XFLAG);	// turn off call, force M on
+					if(xmode & MEMM_XFLAG){
+						mmema(0);										// turn off "M"
+						xmode &= ~MEMM_XFLAG;
+					}else{
+						mmema(1);										// turn on "M"
+						xmode |= MEMM_XFLAG;
+					}
+				}else{
+					if(xmode & CALLS_XFLAG) xmode &= ~(CALLS_XFLAG|MEMS_XFLAG);	// turn off call, force M on
+					if(xmode & MEMS_XFLAG){
+						smema(0);										// turn off "M"
+						xmode &= ~MEMS_XFLAG;
+					}else{
+						smema(1);										// turn on "M"
+						xmode |= MEMS_XFLAG;
+					}
+				}
+				break;
+
+			case CALLchr:												// call-mode toggle: this toggles between call mode
+				// if mem mode, turn off
+				if(band_focus == MAIN){
+					if(xmode & CALLM_XFLAG){
+						xmode &= ~CALLM_XFLAG;
+						if(xmode & MEMM_XFLAG){
+							mmema(1);									// turn on "M"
+						}
+					}else{
+						mmema(0);										// turn off "M"
+						xmode |= CALLM_XFLAG;
+					}
+					iflags |= SIN_MSRF_F;								// force update of MSRF
+				}else{
+					if(xmode & CALLS_XFLAG){
+						xmode &= ~CALLS_XFLAG;
+						if(xmode & MEMS_XFLAG){
+							smema(1);									// turn on "M"
+						}
+					}else{
+						smema(0);										// turn off "M"
+						xmode |= CALLS_XFLAG;
+					}
+					iflags |= SIN_SSRF_F;								// force update of SSRF
+				}
+				break;
 			}
 		}
 	}
@@ -1075,10 +1144,11 @@ void smute_action(U8* mute_flag){
 //-----------------------------------------------------------------------------
 // process_DIAL() handles dial changes
 //-----------------------------------------------------------------------------
-void process_DIAL(U8 focus){
+U32 process_DIAL(U8 focus){
 	U8	i;					// temp
 	U8	j;
 	U8	k;
+	U32	rflags = 0;			// return flags
 
 	// process dial
 	j = is_mic_updn() + get_dial(1);
@@ -1113,41 +1183,63 @@ void process_DIAL(U8 focus){
 			}
 		}else{
 			if(j){
-				if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
-					i = add_vfo(focus, j, maddr);			// update vfo
-					if(i && (focus == MAIN)){
-						mfreq(get_freq(MAIN), 0, 0);		// update display
-					}
-					if(i && (focus == SUB)){
-						sfreq(get_freq(SUB), 0, 0);
-					}
-					vfo_change(focus);
-				}else{										// digit-by-digit (thumbwheel) mode
-					k = maddr & (~MHZ_OFFS);				// mask offset mode flag
-					if(k == 0) j = (j & 0x01) * 5;			// pick the odd 5KHz
-					i = add_vfo(focus, j, maddr);			// update vfo
-					if(mhz_time(0)){
-						mhz_time(1);						// reset timer
-						if(maddr & MHZ_OFFS){
-							offs_time(1);
+				// if focus and mem mode == active:
+				if(((xmode & (MEMM_XFLAG|CALLM_XFLAG)) && (focus == MAIN)) | ((xmode & (MEMS_XFLAG|CALLS_XFLAG)) && (focus == SUB))){
+					// inc/dec memory#
+					if(focus == MAIN){
+						if(xmode & CALLM_XFLAG){
+							get_callnum(focus, j);
+						}else{
+							get_memnum(focus, j);
 						}
+						rflags = SIN_MSRF_F;					// force update of MSRF
+					}else{
+						if(xmode & CALLS_XFLAG){
+							get_callnum(focus, j);
+						}else{
+							get_memnum(focus, j);
+						}
+						rflags = SIN_SSRF_F;					// force update of MSRF
 					}
-					else{
-						mhz_time(0xff);						// exit MHz mode
-						offs_time(0xff);
+				}else{
+					if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
+						// No thumbwheel mode:
+						i = add_vfo(focus, j, maddr);			// update vfo
+						if(i && (focus == MAIN)){
+							mfreq(get_freq(MAIN), 0, 0);		// update display
+						}
+						if(i && (focus == SUB)){
+							sfreq(get_freq(SUB), 0, 0);
+						}
+						vfo_change(focus);
+					}else{
+						// digit-by-digit (thumbwheel) mode
+						k = maddr & (~MHZ_OFFS);				// mask offset mode flag
+						if(k == 0) j = (j & 0x01) * 5;			// pick the odd 5KHz
+						i = add_vfo(focus, j, maddr);			// update vfo
+						if(mhz_time(0)){
+							mhz_time(1);						// reset timer
+							if(maddr & MHZ_OFFS){
+								offs_time(1);
+							}
+						}
+						else{
+							mhz_time(0xff);						// exit MHz mode
+							offs_time(0xff);
+						}
+						if(i && (focus == MAIN)){
+							mfreq(get_vfot(), LEAD0_BLINK, 0);	// update main display
+						}
+						if(i && (focus == SUB)){
+							sfreq(get_vfot(), LEAD0_BLINK, 0);	// update sub display
+						}
+						vfo_change(focus);
 					}
-					if(i && (focus == MAIN)){
-						mfreq(get_vfot(), LEAD0_BLINK, 0);	// update main display
-					}
-					if(i && (focus == SUB)){
-						sfreq(get_vfot(), LEAD0_BLINK, 0);	// update sub display
-					}
-					vfo_change(focus);
 				}
 			}
 		}
 	}
-	return;
+	return rflags;
 }	// end process_DIAL()
 
 //-----------------------------------------------------------------------------
@@ -1339,7 +1431,7 @@ void msmet(U8 srf, U8 blink){
 		lcd_buf[10] = WR_BMEM;							// no flash
 		put_spi(lcd_buf, CS_OPENCLOSE);					// send DU message
 		srf = 0;
-		mmem(get_memnum(MAIN));							// restore mem#
+		mmem(get_memnum(MAIN, 0));						// restore mem#
 	}
 	if(srf & 0x80){										// do q/v level
 		srf &= 0x7f;
@@ -1371,6 +1463,15 @@ void msmet(U8 srf, U8 blink){
 			lcd_buf[10] = WR_BMEM | MSRF0;				// flash lowest SRF segment
 		}
 		put_spi(lcd_buf, CS_OPENCLOSE);					// send DU message
+	}else{
+		if(fetch_sin(1) & SIN_SEND){					// if ptt == 1
+			if(srf > 2){								// we need *something* from the module...
+				if(get_lohi(MAIN, 0xff)) srf = 2;		// ... before we mod SRF to reflect TX power level
+				else srf = MAX_SRF;
+			}else{
+				srf = 0;								// ... or that the TXRF is dead
+			}
+		}
 	}
 	i = 0;												// construct ordinal bar, lsb = lowest bar
 	if(srf <= MAX_SRF){
@@ -1413,7 +1514,7 @@ void ssmet(U8 srf, U8 blink){
 		lcd_buf[10] = WR_BMEM;							// no flash
 		put_spi(lcd_buf, CS_OPENCLOSE);					// send DU message
 		srf = 0;
-		smem(get_memnum(SUB));							// restore mem#
+		smem(get_memnum(SUB, 0));						// restore mem#
 	}
 	if(srf & 0x80){										// do q/v level
 		srf &= 0x7f;
@@ -1471,12 +1572,12 @@ void ssmet(U8 srf, U8 blink){
 //-----------------------------------------------------------------------------
 
 // LUT to convert (ASCII - 0x20) to uPD7225 packed 7segment code
-//	starts at ASCII 0x20 (space).  0x38 is no-corresponding-code representation
-//	(3 horiz bars)
+//	starts at ASCII 0x20 (space).  0x38 ('!') is "no-corresponding-code" representation
+//	(3 horiz bars).  Alternate invalid chr is 0x09 (segments "ab",character '#').
 
 U8 asc7seg[] = {
-	0x00, 0x38, 0x41, 0x38, 0x38, 0x91, 0x38, 0x40,		// <spc>, !, ", #, $, %, &, ',
-	0xE8, 0x2B, 0x38, 0xD0, 0x38, 0x10, 0x38, 0x91,		// (, ), *, +, ,, -, ., /,
+	0x00, 0x38, 0x41, 0x09, 0x38, 0x91, 0x38, 0x40,		// <spc>, !, ", #, $, %, &, ',
+	0xB0, 0x32, 0x38, 0xD0, 0x38, 0x10, 0x38, 0x91,		// (, ), *, +, ,, -, ., /,
 	0xEB, 0x03, 0xB9, 0x3B, 0x53, 0x7A, 0xFA, 0x0B,		// 0, 1, 2, 3, 4, 5, 6, 7,
 	0xFB, 0x7B, 0x38, 0x38, 0xB0, 0x30, 0x32, 0x99,		// 8, 9, :, ;, <, =, >, ?,
 	0xBB, 0xDB, 0xF2, 0xB0, 0xB3, 0xF8, 0xD8, 0xEA,		// @, A, B, C, D, E, F, G,
@@ -1490,12 +1591,11 @@ U8	asc27(char c){
 	U8	rtn;
 
 	if(c >= ' ') i = (U8)(c - ' ');						// convert char to 7-seg code LUT index
-	else i = 0xff;										// set invalid char
+	else i = (U8)'!';									// set invalid char
 	if(i > sizeof(asc7seg)){
-		rtn = 0x09;										// invalid char
-	}else{
-		rtn = asc7seg[i];								// return seg code
+		i = (U8)'!';									// set invalid char
 	}
+	rtn = asc7seg[i];									// return seg code
 	return rtn;
 }
 
@@ -1569,12 +1669,15 @@ U8	puts_lcd(char *s, U8 dp_tf, U8 focus){
 //-----------------------------------------------------------------------------
 // mmem() displays main mem#.  Input is ASCII char.
 //-----------------------------------------------------------------------------
-void mmem(char c){
-	U8	i;		// temp
+void mmem(U8 mn){
+	U8		i;		// temp
+	char	mchr;
 
+	if(mn >= NUM_MEMS) mchr = 0;
+	else mchr = mem_ordinal[mn];
 	lcd_buf[0] = CS1_MASK | 0x04;
 	lcd_buf[1] = LOAD_PTR | MMEM_ADDR;
-	i = asc27(c);										// get seg code
+	i = asc27(mchr);									// get seg code
 	lcd_buf[2] = WR_DMEM | (i & 0x03);
 	i >>= 3;
 	lcd_buf[3] = WR_DMEM | (i & 0x07);
@@ -1586,12 +1689,15 @@ void mmem(char c){
 //-----------------------------------------------------------------------------
 // smem() displays sub mem#.  Input is ASCII.
 //-----------------------------------------------------------------------------
-void smem(char c){
+void smem(U8 mn){
 	U8	i;		// temp
+	char	mchr;
 
+	if(mn >= NUM_MEMS) mchr = 0;
+	else mchr = mem_ordinal[mn];
 	lcd_buf[0] = CS2_MASK | 0x04;
 	lcd_buf[1] = LOAD_PTR | SMEM_ADDR;
-	i = asc27(c);										// get seg code
+	i = asc27(mchr);									// get seg code
 	lcd_buf[2] = WR_DMEM | (i & 0x03);
 	i >>= 3;
 	lcd_buf[3] = WR_DMEM | (i & 0x07);

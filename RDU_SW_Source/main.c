@@ -13,7 +13,7 @@
 /********************************************************************
  *  Project scope rev notes:
  *    				 To-do Checklist time!
- *    				 * Modify send_vfo() and all other HIB interfaces to use SPI-NVRAM
+ *    				 * need to implement system warning messages on LCD and serial ports.
  *    				 * test band switching (VFO button)
  *    				 * Memory/Call mode:
  *    				 	- establish memory map for stored channels
@@ -29,9 +29,23 @@
  *
  *
  *    Project scope rev History:
+ *    09-13-21 jmh:	 Debugged mem-init and user sernum I/O.  User sernum is 16 bytes of segregated data on the NVRAM.  Used here
+ *    					to hold a vanity string and 3 bytes if "NVRAM versioning" to help validate the NVRAM contents.
+ *    				 Added initial memory support (UI).  MR/CALL keys now work, and the mem/call# can be adjusted when mem mode active.
+ *    				 	!!! Need to add code to move data from NVRAM as the memory# is changed and handle MR toggles.
+ *    09-12-21 jmh:	 Added mem-init code to init_radio invalid NVRAM init. Version SN for NVRAM added (uses nvram_sn() to
+ *    					validate NVRAM config). Uses User-SN word in NVRAM to validate SRAM config
+ *    				 Added defines and copy-vfo to NVRAM fn (write_mem()) for memories.
  *    09-11-21 jmh:	 NVRAM test successful.  Added CLI debug commands.
  *    				 replaced IC2 on LCD board to correct wonky segments in sub-band freq display.  So far, so good...
- *					 Transferred HIB storage to NVRAM & debug (round 1)
+ *					 Transferred HIB storage to NVRAM & debug (round 1).
+ *					 NVRAM validation consists of limit checking the 6 vfos against the hard RX limits etched in FLASH.  If all
+ *					 	6 modules are within the limit, then the RAM is valid.  Even if a module is never connected, the base
+ *					 	init should always be there.  This is not perfect, but should offer a decent compromise of data integrity
+ *					 	vs. reduced algorithm complexity.
+ *					 Added traps to modify the TX SRF for hi/lo power.  High power = full scale, low power = 2 segments.  Forces
+ *					 	SRF update on PTT edge to recover the Smet display after PTT released.
+ *					 Modified the fixed-value dim/brt settings to increase the level of the back-lit-button LEDs.
  *    09-09-21 jmh:	 Incorporated NVRAM mod (revA of the schem, dated 9/09/21 or later).  Connects a 1Mb auto-store SPI NVRAM
  *    					to the SPI port.  Use this instead of HIB and EEPROM to store NV data.  Requires bit-bang SPI because
  *    					there are no SSIRX I/O pins available without significantly upsetting the GPIO map.

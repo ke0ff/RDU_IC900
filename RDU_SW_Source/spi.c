@@ -355,16 +355,22 @@ U32 rw32_nvr(U32 addr, U32 dataw, U8 mode)
  * rwusn_nvr r/w NVRAM user seria#
  *
  */
-U16 rwusn_nvr(U16 dataw, U8 mode)
+void rwusn_nvr(U8* dptr, U8 mode)
 {
 	U16	ii;
+	U8	i;
+	U8	j;
 
+	if(mode&CS_WRITE) wen_nvr();
 	open_nvr();
 	if(mode&CS_WRITE) shift_spi(WRSNR);
 	else shift_spi(RDSNR);
-	ii = rw16_nvr(0, dataw, (mode&CS_WRITE));
+	for(i=0; i<16; i++, dptr++){
+		j = shift_spi(*dptr);
+		if(!(mode&CS_WRITE)) *dptr = j;
+	}
 	close_nvr();
-	return ii;
+	return;
 }
 
 //-----------------------------------------------------------------------------

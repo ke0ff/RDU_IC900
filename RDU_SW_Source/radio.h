@@ -31,23 +31,48 @@
 
 // NVRAM memory map
 #define	NVRAM_BASE	(0L)
-#define	VFO_0		(NVRAM_BASE)				// main vfo array
-#define	OFFS_0		(VFO_0 + (sizeof(U32) * NUM_VFOS))	// TX offset array
-#define	DPLX_0		(OFFS_0 + (sizeof(U16) * NUM_VFOS))	// duplex/RFpwr/XIT/MEM - array
-#define	CTCSS_0		(DPLX_0 + (NUM_VFOS))		// PL setting array
-#define	TSA_0		(CTCSS_0 + (NUM_VFOS))		// frq step "A" array
-#define	TSB_0		(TSA_0 + (NUM_VFOS))		// frq step "B" array
-#define	SQ_0		(TSB_0 + (NUM_VFOS))		// SQ array
-#define	VOL_0		(SQ_0 + (NUM_VFOS))			// VOL array
-#define	MEM_0		(VOL_0 + (NUM_VFOS))		// mem# array
-#define	XIT_0		(MEM_0 + (NUM_VFOS))		// xit reg
-#define	RIT_0		(XIT_0 + 1)					// rit reg
-#define	BIDM_0		(RIT_0 + 1)					// bandidm reg
-#define	BIDS_0		(BIDM_0 + 1)				// bandids reg
+// Each VFO is stored to NVRAM as a "union" with individual elements of disparate arrays
+// grouped together to reduce SPI transfer overhead.
+#define	VFO_0		(NVRAM_BASE)				// main vfo freq
+#define	OFFS_0		(VFO_0 + (sizeof(U32)))		// TX offset freq
+#define	DPLX_0		(OFFS_0 + (sizeof(U16)))	// duplex/RFpwr/XIT/MEM
+#define	CTCSS_0		(DPLX_0 + sizeof(U8))		// PL setting
+#define	TSA_0		(CTCSS_0 + sizeof(U8))		// frq step "A"
+#define	TSB_0		(TSA_0 + sizeof(U8))		// frq step "B"
+#define	SQ_0		(TSB_0 + sizeof(U8))		// SQ
+#define	VOL_0		(SQ_0 + sizeof(U8))			// VOL
+#define	MEM_0		(VOL_0 + sizeof(U8))		// mem#
+#define	CALL_0		(MEM_0 + sizeof(U8))		// call-mem#
+#define	BFLAGS_0	(CALL_0 + sizeof(U8))		// expansion flags
+#define	SCANFLAGS_0	(BFLAGS_0 + sizeof(U8))		// scan (expansion) flags
 
-#define	VFO_END		(BIDS_0 + 1)				// start of next segment
+#define	VFO_LEN		((SCANFLAGS_0 + sizeof(U8)) - VFO_0)
+#define	XIT_0		((VFO_LEN * NUM_VFOS) + VFO_0)		// xit reg
+#define	RIT_0		(XIT_0 + sizeof(U8))		// rit reg
+#define	BIDM_0		(RIT_0 + sizeof(U8))		// bandidm reg
+#define	BIDS_0		(BIDM_0 + sizeof(U8))		// bandids reg
+#define	VFO_END		(BIDS_0 + sizeof(U8))		// start of next segment
 
+#define	TXULIM_0	VFO_END						// TX upper limits (per band)
+#define	TXLLIM_0	(TXULIM_0 + (sizeof(U32) * ID1200)) // TX lower limits (per band)
+#define	LIM_END		(TXLLIM_0 + (sizeof(U32) * ID1200))	// start of next segment
 
+#define	MEM_NAME_LEN	12
+#define	MEM0_BASE	(LIM_END)
+					// mem structure follows this format:
+					// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+#define	MEM_LEN		(sizeof(U32) + sizeof(U16) + (sizeof(U8) * 7) + MEM_NAME_LEN)
+#define	NUM_MEMS	34							// 30 mems, + 4 call mems
+#define	MAX_MEM		30
+#define	CALL_MEM	30
+
+#define	ID10M_MEM	MEM0_BASE
+#define	ID6M_MEM	(ID10M_MEM + (NUM_MEMS * MEM_LEN))
+#define	ID2M_MEM	(ID6M_MEM + (NUM_MEMS * MEM_LEN))
+#define	ID220_MEM	(ID2M_MEM + (NUM_MEMS * MEM_LEN))
+#define	ID440_MEM	(ID220_MEM + (NUM_MEMS * MEM_LEN))
+#define	ID1200_MEM	(ID440_MEM + (NUM_MEMS * MEM_LEN))
+#define	MEM_END		(ID1200_MEM + (NUM_MEMS * MEM_LEN))
 
 // CTCSS flags
 #define	CTCSS_MASK		0x3F				// tone code mask
@@ -161,9 +186,11 @@ void temp_vfo(U8 main);
 U32 get_vfot(void);
 void  force_push_radio(void);
 U8 get_lohi(U8 bid, U8 setread);
-U8 get_memnum(U8 main);
+U8 get_memnum(U8 main, U8 adder);
+U8 get_callnum(U8 main, U8 adder);
 U8 get_bit(U8 value);
 U8 set_bit(U8 value);
+U8 bit_set(U8 value);
 void  update_radio_all(void);
 void set_offs(U8 focus, U16 value);
 U16 get_offs(U8 focus);
@@ -171,3 +198,4 @@ U8 inv_duplex(U8 focus);
 U8 inv_vfo(U8 focus);
 void mute_radio(U8 mutefl);
 U8 get_mute_radio(void);
+void write_mem(U8 memnum, U8 focus);

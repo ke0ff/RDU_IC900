@@ -26,7 +26,7 @@
 #define	MAIN_MODE		0x01	// "normal" mode, main focus
 #define	SUB_D			0x02	// disp signal sub flag
 #define	SET_MODE		0x04	// set/config loop mode
-#define	MEM_MODE		0x08	// mem mode
+//#define	???		0x08	// spare
 #define	VMODE_MASK		0xf0	// "normal" vfo display mode mask
 #define	VMODE_TSDISP	0x10	// display TS adj
 #define	VMODE_TDISP		0x20	// display PL tone
@@ -41,6 +41,10 @@
 #define	SQU_XFLAG		0x02
 #define	TONE_XFLAG		0x04
 #define	OFFS_XFLAG		0x08
+#define	MEMM_XFLAG		0x10
+#define	MEMS_XFLAG		0x20
+#define	CALLM_XFLAG		0x40
+#define	CALLS_XFLAG		0x80
 
 // chkmode flags
 #define	REV_FLAG		0x01		// reverse mode enabled
@@ -184,8 +188,8 @@ void msmet(U8 srf, U8 blink);
 void ssmet(U8 srf, U8 blink);
 U8 mputs_lcd(char *s, U8 dp_tf);
 U8 sputs_lcd(char *s, U8 dp_tf);
-void mmem(char c);
-void smem(char c);
+void mmem(U8 mn);
+void smem(U8 mn);
 void mtonea(U8 tf);
 void mmema(U8 tf);
 void stonea(U8 tf);

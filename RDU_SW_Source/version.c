@@ -57,3 +57,14 @@ void ccmdSWvers(char* sbuf){
 
     sprintf(sbuf,"RDU,IPL:%04x,Vers:%s,%s",getipl(),version_number,date_code);
 }
+
+//-----------------------------------------------------------------------------
+// nvram_sn() returns NVRAM sernum
+//	this number is used to validate NVRAM revision.  If this number differs
+//	from that stored on the NVRAM, the system must execute nvram_fix() to update
+//	or re-init the SRAM contents.
+//-----------------------------------------------------------------------------
+U16 nvram_sn(void){
+
+    return 0x0001;
+}

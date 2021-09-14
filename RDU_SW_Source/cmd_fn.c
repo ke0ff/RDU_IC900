@@ -115,6 +115,8 @@ U8	lcd_init_L4[] = { 0x82, 0xfb, 0x14 };
 U8	lcd_init_L5[] = { 0xa1, 0x00 };
 U8	lcd_init_L6[] = { 0x82, 0xfd, 0xb0 };
 
+//				   0123456789012345
+const char un_ary[] = { "RDU-900,ke0ff\0\0\0" };					// init User SN string
 
 //=============================================================================
 // local Fn declarations
@@ -152,11 +154,12 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 	U16		params[ARG_MAX];		// holding array for numeric params
 	char	c;						// char temp
 //	char	d;						// char temp
-	char	pc = FALSE;				// C flag (set if "C" found in args)
-	char	pw = FALSE;				// W flag (set if "W" found in args)
-	char	px = FALSE;				// X flag (set if "X" found in args)
-	char	ps = FALSE;				// s flag (set if <wsp>S<wsp> found in args)
-	char	pv = FALSE;				// V flag (set if <wsp>V<wsp> found in args)
+	char	pc = FALSE;				// C flag (set if "-C" found in args)
+	char	pw = FALSE;				// W flag (set if "-W" found in args)
+	char	px = FALSE;				// X flag (set if "-X" found in args)
+	char	ps = FALSE;				// s flag (set if <wsp>-S<wsp> found in args)
+	char	pv = FALSE;				// V flag (set if <wsp>-V<wsp> found in args)
+	char	pr = FALSE;				// R flag (set if <wsp>-R<wsp> found in args)
 	int		cmd_found = TRUE;		// default to true, set to false if no valid cmd identified
 //	char*	q;						// char temp pointer
 	char*	s;						// char temp pointer
@@ -184,6 +187,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 //	S32		si;
 	float	fa;
 	float	fb;
+	char	gp_buf[16];				// gen-purpose buffer
 
 	bchar = '\0';																// clear global escape
     if (nargs > 0){
@@ -228,6 +232,11 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 			c = parm_srch(nargs, args, "-X");									// capture x-flag select floater
 			if(c){
 				px = TRUE;
+				nargs--;
+			}
+			c = parm_srch(nargs, args, "-R");									// capture x-flag select floater
+			if(c){
+				pr = TRUE;
 				nargs--;
 			}
 			gas_gage(2);														// init gas gauge to disabled state
@@ -355,19 +364,42 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					break;
 
 				case nvcmd:
+					if(px){
+						for(i=0; i<16; i++){
+							gp_buf[i] = un_ary[i];
+							rwusn_nvr((U8*)gp_buf, CS_WRITE);
+						}
+					}
 					if(pc){
 						wen_nvr();
 						putsQ("enable NV writes");
 					}
 					if(ps){
+						for(i=0; i<16; i++){
+							gp_buf[i] = 0xff;
+						}
 						i = 0;
 						if(pw) i = CS_WRITE;
 						params[0] = 0;
 						get_Dargs(1, nargs, args, params);						// parse param numerics into params[] array
 						rws_nvr((U32)params[0], i);
 						i = rws_nvr(0, 0);
+						rwusn_nvr((U8*)gp_buf, 0);
 						sprintf(obuf,"NV Status: %02x", i);
-						putsQ(obuf);
+						putsQ("User SN:");
+						for(i=0; i<16; i++){
+							sprintf(obuf," %02x", gp_buf[i]);
+							putssQ(obuf);
+						}
+						putsQ(" ");
+						i = gp_buf[13];										// place a temp null, display, then restore the location of the null
+						gp_buf[13] = '\0';
+						putsQ(gp_buf);
+						gp_buf[13] = i;
+					}
+					if(pr){
+						storecall_nvr(0);
+						putsQ("RECALL NV");
 					}
 					break;
 
