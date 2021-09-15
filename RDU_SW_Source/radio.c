@@ -83,6 +83,10 @@ U8	scanflags[NUM_VFOS];				// scan flags (expansion)
 
 U8	ux129_xit;							// XIT setting (UX-129) - 4-bit signed nybble (+7/-8)
 U8	ux129_rit;							// RIT setting (UX-129) - 4-bit signed nybble (+7/-8)
+U8	ux129_xit_m;						// main temp
+U8	ux129_rit_m;
+U8	ux129_xit_s;						// sub temp
+U8	ux129_rit_s;
 U8	bandid_m;							// bandid for main (index into above data structures)
 U8	bandid_s;							// bandid for sub (index into above data structures)
 
@@ -106,8 +110,7 @@ U32	offs_ulim[] = { 13000L, 15000L, 40000L, 13000L, 50000L, 900000L };
 U32 mem_band[] = { ID10M_MEM, ID6M_MEM, ID2M_MEM, ID220_MEM, ID440_MEM, ID1200_MEM };
 //U32 mem_band[1] = { ID10M_MEM };
 // mem name strings
-char memname_m[MEM_NAME_LEN];
-char memname_s[MEM_NAME_LEN];
+char memname[NUM_VFOS][MEM_NAME_LEN];
 
 // **************************************************************
 
@@ -212,6 +215,7 @@ U32 init_radio(void){
 			scanflags[i] = 0xff;					// scan flags (expansion)
 			vfo_tulim[i] = vfo_ulim[i];				// copy RX limits to TX
 			vfo_tllim[i] = vfo_llim[i];
+			memname[i][0] = '\0';					// init mem names
 		}
 		vfo[ID10M_IDX] = 29100L;					// each band has a unique initial freq
 		vfo[ID6M_IDX] = 52525L;
@@ -229,13 +233,11 @@ U32 init_radio(void){
 		ux129_rit = 0;
 		// init mems
 		putsQ("Initializing MEMS...");				// display status msg to console
-		memname_m[0] = '\0';						// init mem names
-		memname_s[0] = '\0';
 		push_vfo();									// push new data vfo to nvram (hib)
 		// copy default VFOs to memory space
 		for(bandid_m=ID10M_IDX; bandid_m<ID1200; bandid_m++){
 			for(i=0; i<NUM_MEMS; i++){
-				write_mem(i, MAIN);
+				write_mem(MAIN, i);
 			}
 		}
 		bandid_m = BAND_ERROR;						// default to error, figure out assignment below...
@@ -354,7 +356,7 @@ void  process_SOUT(U8 cmd){
 	static	U8	xit_count;		// used to mechanize UX-129 XIT/RIT adjustment sequences
 	static	U8	xit_dir;
 			U32* pptr;			// pointer into SOUT buffer
-			char dgbuf[30];		// !!!!debug sprintf/putsQ buffer
+			char dgbuf[30];		// !!! debug sprintf/putsQ buffer
 
 	if(cmd == 0xff){								// initial program load (reset) branch
 		pll_ptr = 0xff;								// set index to "idle" state
@@ -1773,19 +1775,45 @@ U8 get_mute_radio(void){
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-// write_mem() writes the vfo state to the memory space
+// write_mem() writes the vfo state to the nv memory space
 //-----------------------------------------------------------------------------
-void write_mem(U8 memnum, U8 focus){
+void write_mem(U8 focus, U8 memnum){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+	U8	band;
+
+	if(focus == MAIN) band = bandid_m;
+	else band = bandid_s;
+	write_nvmem(band, memnum);
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// read_mem() reads the vfo state from the nv memory space
+//-----------------------------------------------------------------------------
+void read_mem(U8 focus, U8 memnum){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+	U8	band;
+
+	if(focus == MAIN) band = bandid_m;
+	else band = bandid_s;
+	read_nvmem(band, memnum);
+	return;
+}
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// write_nvmem() writes the vfo state to the nv memory space
+//-----------------------------------------------------------------------------
+void write_nvmem(U8 band, U8 memnum){
 	// mem structure follows this format:
 	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
 	U32	addr;		// temps
 	U8	i;
 	U8	j;
-	U8	band;
 	char* cptr;
 
-	if(focus == MAIN) band = bandid_m;
-	else band = bandid_s;
 	addr = mem_band[band] + (memnum * MEM_LEN);
 	j = CS_WRITE;
 	rw32_nvr(addr, vfo[band], j|CS_OPEN);
@@ -1797,12 +1825,109 @@ void write_mem(U8 memnum, U8 focus){
 	rw8_nvr(addr, ux129_xit, j);
 	rw8_nvr(addr, ux129_rit, j);
 	rw8_nvr(addr, band, j);
-	if(focus == MAIN) cptr = memname_m;
-	else cptr = memname_s;
+	cptr = memname[band];
 	for(i=0; i<MEM_NAME_LEN; i++){
 		if(i == (MEM_NAME_LEN - 1)) j |= CS_CLOSE;
 		rw8_nvr(addr, *cptr++, j);
 	}
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// read_nvmem() read the vfo state from the nv memory space
+//-----------------------------------------------------------------------------
+void read_nvmem(U8 band, U8 memnum){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+	U32	addr;		// temps
+	U8	i;
+	U8	j;
+	char* cptr;
+
+	addr = mem_band[band] + (memnum * MEM_LEN);
+	j = CS_READ;
+	vfo[band] = rw32_nvr(addr, 0, j|CS_OPEN);
+	offs[band] = rw16_nvr(addr, 0, j);
+	dplx[band] = rw8_nvr(addr, 0, j);
+	ctcss[band] = rw8_nvr(addr, 0, j);
+	sq[band] = rw8_nvr(addr, 0, j);
+	vol[band] = rw8_nvr(addr, 0, j);
+	ux129_xit = rw8_nvr(addr, 0, j);
+	ux129_rit = rw8_nvr(addr, 0, j);
+	band = rw8_nvr(addr, 0, j);
+	cptr = memname[band];
+	for(i=0; i<MEM_NAME_LEN; i++){
+		if(i == (MEM_NAME_LEN - 1)) j |= CS_CLOSE;
+		*cptr++ = rw8_nvr(addr, 0, j);
+	}
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// copy_vfo2temp() copy VFO to temp space
+//-----------------------------------------------------------------------------
+void copy_vfo2temp(U8 focus){
+	U8	tempi;
+	U8	band;
+
+	if(focus == MAIN){
+		band = bandid_m;
+		tempi = IDMMVFO_IDX;
+		ux129_xit_m = ux129_xit;
+		ux129_rit_m = ux129_rit;
+	}else{
+		band = bandid_s;
+		tempi = IDSMVFO_IDX;
+		ux129_xit_s = ux129_xit;
+		ux129_rit_s = ux129_rit;
+	}
+	vfo[tempi] = vfo[band];
+	offs[tempi] = offs[band];
+	dplx[tempi] = dplx[band];
+	ctcss[tempi] = ctcss[band];
+	sq[tempi] = sq[band];
+	vol[tempi] = vol[band];
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// copy_temp2vfo() copy temp to VFO space
+//-----------------------------------------------------------------------------
+void copy_temp2vfo(U8 focus){
+	U8	tempi;
+	U8	band;
+
+	if(focus == MAIN){
+		band = bandid_m;
+		tempi = IDMMVFO_IDX;
+		ux129_xit = ux129_xit_m;
+		ux129_rit = ux129_rit_m;
+	}else{
+		band = bandid_s;
+		tempi = IDSMVFO_IDX;
+		ux129_xit = ux129_xit_s;
+		ux129_rit = ux129_rit_s;
+	}
+	vfo[band] = vfo[tempi];
+	offs[band] = offs[tempi];
+	dplx[band] = dplx[tempi];
+	ctcss[band] = ctcss[tempi];
+	sq[band] = sq[tempi];
+	vol[band] = vol[tempi];
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_bandid() writes the band id to the indicated register
+//-----------------------------------------------------------------------------
+void set_bandid(U8 focus, U8 b_id){
+
+	if(focus == MAIN) bandid_m = b_id;
+	else bandid_s = b_id;
 	return;
 }
 

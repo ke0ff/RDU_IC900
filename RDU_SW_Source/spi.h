@@ -29,6 +29,7 @@
 #define	CS_CLOSE		2
 #define	CS_OPENCLOSE	(CS_OPEN | CS_CLOSE)
 #define	CS_IDLE			0
+#define	CS_READ			0
 #define	CS_WRITE		0x80
 
 // BUSY WAIT TIMEOUT

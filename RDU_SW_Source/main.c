@@ -13,6 +13,7 @@
 /********************************************************************
  *  Project scope rev notes:
  *    				 To-do Checklist time!
+ *    				 !!! there is a noticable lag in the PTT now.  Need to identify the cycle-hog !!!
  *    				 * need to implement system warning messages on LCD and serial ports.
  *    				 * test band switching (VFO button)
  *    				 * Memory/Call mode:
@@ -29,6 +30,9 @@
  *
  *
  *    Project scope rev History:
+ *    09-14-21 jmh:	 Added meat to the memory/call modes.  Save/recall are both coded and basic function is verified.  MW in mem
+ *    					mode copies memory to VFO (same as IC-901).  !!! M/S swaps need to swap the temp VFOs, M mode needs to follow
+ *    					band in swaps (seems like this isn't how it is working).  Same notes apply to band switching (VFO button).
  *    09-13-21 jmh:	 Debugged mem-init and user sernum I/O.  User sernum is 16 bytes of segregated data on the NVRAM.  Used here
  *    					to hold a vanity string and 3 bytes if "NVRAM versioning" to help validate the NVRAM contents.
  *    				 Added initial memory support (UI).  MR/CALL keys now work, and the mem/call# can be adjusted when mem mode active.

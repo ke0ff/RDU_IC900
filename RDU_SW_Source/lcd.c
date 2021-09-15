@@ -894,55 +894,125 @@ U8 process_MS(U8 mode){
 				}
 				break;
 
-			case MRchr:													// Mem-mode toggle: this toggles between mem and vfo mode
+			case MRchr:															// Mem-mode toggle: this toggles between mem and vfo mode
 				// if mem mode, turn off
 				if(band_focus == MAIN){
 					if(xmode & CALLM_XFLAG) xmode &= ~(CALLM_XFLAG|MEMM_XFLAG);	// turn off call, force M on
 					if(xmode & MEMM_XFLAG){
-						mmema(0);										// turn off "M"
+						mmema(0);												// turn off "M"
 						xmode &= ~MEMM_XFLAG;
+						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){
+							copy_temp2vfo(band_focus);
+						}
 					}else{
-						mmema(1);										// turn on "M"
+						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){			// copy vfo to temp
+							copy_vfo2temp(band_focus);
+						}
+						mmema(1);												// turn on "M"
 						xmode |= MEMM_XFLAG;
+						read_mem(band_focus, get_memnum(band_focus, 0));
 					}
 				}else{
 					if(xmode & CALLS_XFLAG) xmode &= ~(CALLS_XFLAG|MEMS_XFLAG);	// turn off call, force M on
 					if(xmode & MEMS_XFLAG){
-						smema(0);										// turn off "M"
+						smema(0);												// turn off "M"
 						xmode &= ~MEMS_XFLAG;
+						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){
+							copy_temp2vfo(band_focus);
+							update_lcd();
+						}
 					}else{
-						smema(1);										// turn on "M"
+						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){			// copy vfo to temp
+							copy_vfo2temp(band_focus);
+						}
+						smema(1);												// turn on "M"
 						xmode |= MEMS_XFLAG;
+						read_mem(band_focus, get_memnum(band_focus, 0));
 					}
 				}
+				update_lcd();
 				break;
 
-			case CALLchr:												// call-mode toggle: this toggles between call mode
+			case CALLchr:														// call-mode toggle: this toggles between call mode
 				// if mem mode, turn off
 				if(band_focus == MAIN){
 					if(xmode & CALLM_XFLAG){
 						xmode &= ~CALLM_XFLAG;
 						if(xmode & MEMM_XFLAG){
-							mmema(1);									// turn on "M"
+							mmema(1);											// turn on "M"
+						}
+						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){
+							copy_temp2vfo(band_focus);
 						}
 					}else{
-						mmema(0);										// turn off "M"
+						mmema(0);												// turn off "M"
+						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){			// copy vfo to temp
+							copy_vfo2temp(band_focus);
+						}
 						xmode |= CALLM_XFLAG;
+						read_mem(band_focus, get_callnum(band_focus, 0));
 					}
-					iflags |= SIN_MSRF_F;								// force update of MSRF
+					iflags |= SIN_MSRF_F;										// force update of MSRF
 				}else{
 					if(xmode & CALLS_XFLAG){
 						xmode &= ~CALLS_XFLAG;
 						if(xmode & MEMS_XFLAG){
-							smema(1);									// turn on "M"
+							smema(1);											// turn on "M"
+						}
+						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){
+							copy_temp2vfo(band_focus);
 						}
 					}else{
-						smema(0);										// turn off "M"
+						smema(0);												// turn off "M"
+						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){			// copy vfo to temp
+							copy_vfo2temp(band_focus);
+						}
 						xmode |= CALLS_XFLAG;
+						read_mem(band_focus, get_callnum(band_focus, 0));
 					}
-					iflags |= SIN_SSRF_F;								// force update of SSRF
+					iflags |= SIN_SSRF_F;										// force update of SSRF
+				}
+				update_lcd();
+				break;
+
+			case CALLchr_H:														// call-mode hold: write VFO to call mem
+				if(band_focus == MAIN){
+					if(xmode & CALLM_XFLAG){
+						copy_temp2vfo(band_focus);
+						write_mem(band_focus, get_callnum(band_focus, 0));
+						iflags |= SIN_MSRF_F;									// force update of MSRF
+						update_lcd();
+					}
+				}else{
+					if(xmode & CALLS_XFLAG){
+						copy_temp2vfo(band_focus);
+						write_mem(band_focus, get_callnum(band_focus, 0));
+						iflags |= SIN_SSRF_F;									// force update of MSRF
+						update_lcd();
+					}
 				}
 				break;
+
+			case MWchr_H:														// Mem-write: write VFO to mem in VFO mode; if mem mode, exits with mem in VFO (copy mem to VFO)
+				if(band_focus == MAIN){
+					if(xmode & (CALLM_XFLAG|MEMM_XFLAG)){;
+						xmode &= ~(CALLM_XFLAG|MEMM_XFLAG);						// turn off call/mem, no VFO coppy-back
+						mmema(0);												// turn off "M"
+						iflags |= SIN_MSRF_F;									// force update of MSRF
+						update_lcd();
+					}else{
+						write_mem(band_focus, get_memnum(band_focus, 0));
+					}
+				}else{
+					if(xmode & (CALLS_XFLAG|MEMS_XFLAG)){;
+						xmode &= ~(CALLS_XFLAG|MEMS_XFLAG);						// turn off call/mem, no VFO coppy-back
+						smema(0);												// turn off "M"
+						iflags |= SIN_SSRF_F;									// force update of MSRF
+						update_lcd();
+					}else{
+						write_mem(band_focus, get_memnum(band_focus, 0));
+					}
+				}
 			}
 		}
 	}
@@ -1201,6 +1271,13 @@ U32 process_DIAL(U8 focus){
 						}
 						rflags = SIN_SSRF_F;					// force update of MSRF
 					}
+					if(xmode & CALLM_XFLAG){
+						read_mem(focus, get_callnum(focus, 0));	// read new call
+					}else{
+						read_mem(focus, get_memnum(focus, 0));	// read new mem
+					}
+					rflags |= SIN_SSRF_F;						// force update of SSRF
+					update_lcd();
 				}else{
 					if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
 						// No thumbwheel mode:

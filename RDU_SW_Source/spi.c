@@ -182,7 +182,7 @@ void lcd_cmd(U8 cdata)
 	}else{
 		GPIO_PORTE_DATA_R &= ~DA_CM;					// set cmd
 	}
-	wait(1);
+//	wait(1);
 	return;
 }
 
