@@ -67,6 +67,7 @@ U8	ux_present_flags;					// bitmapped "present" (AKA, "installed") flags.
 // these data structures are mirrored in a SW shadow NVRAM (HIB RAM)
 //	each band module has its own cluster of data for frq, offset, etc...
 //
+/*
 U32	vfo[NUM_VFOS];						// main vfo frequency (RX) in KHz
 U16	offs[NUM_VFOS];						// TX offset in KHz
 
@@ -87,6 +88,17 @@ U8	ux129_xit_m;						// main temp
 U8	ux129_rit_m;
 U8	ux129_xit_s;						// sub temp
 U8	ux129_rit_s;
+*/
+struct vfo_struct vfo_p[ID1200*2];		// main and temp-copy VFOs - main are mirrored into NVRAM, temp-copies are not
+U8	mem[ID1200];						// mem# setting - an ordinal offset that maps to an ASCII character
+U8	call[ID1200];						// call-mem# setting - an ordinal offset that maps to an ASCII character
+
+// XIT/RIT only apply to one module, one per radio, so we don't need a matrix for them, just a temp.
+U8	ux129_xit;							// XIT setting (UX-129) - 4-bit signed nybble (+7/-8)
+U8	ux129_rit;							// RIT setting (UX-129) - 4-bit signed nybble (+7/-8)
+U8	ux129_xit_t;						// temp
+U8	ux129_rit_t;
+
 U8	bandid_m;							// bandid for main (index into above data structures)
 U8	bandid_s;							// bandid for sub (index into above data structures)
 
@@ -123,13 +135,12 @@ U8	pll_ptr;							// pll_buf index
 U32	so_inita[] = { 0x00000000, 0x3F000818 };
 
 // sout data to scan for installed UX units
-#define	SO_INIT_LENB	6
-U32	so_initb[] = { 0x08000000, 0x10000000, 0x18000000, 0x20000000, 0x28000000, 0x30000000 };
+#define	SO_INIT_LENB	7
+U32	so_initb[] = { 0x08000000, 0x10000000, 0x18000000, 0x20000000, 0x28000000, 0x30000000, 0x00000000 };
 
 // 2m/440 and base unit init (debug patch)
-#define	SO_INIT_LENC	8
-U32	so_initc[] = { 0x2B014a5a, 0x1D00ca08,		// 146.52 (m), 446.00 (s)
-				   0x3CA000EA,					// tone enc
+#define	SO_INIT_LENC	5
+U32	so_initc[] = {
 				   0x3D220050, 					// squ left (main)
 				   0x3D020048,					// squ right
 				   0x3E202090,					// vol left	(main)
@@ -160,34 +171,35 @@ U32 init_radio(void){
 
 	wait(100);
 	// send init array 1 (reset)
-	for(i=0; i<SO_INIT_LENA; i++){					// do base module reset
+	for(i=0; i<SO_INIT_LENA; i++){						// do base module reset
 		send_so(so_inita[i]);
 		wait(10);
 	}
 	// send init array 2 (UX module query)
-	ux_present_flags = 0;							// start with no modules
+	ux_present_flags = 0;								// start with no modules
 	for(i=0, j=0x01; i<SO_INIT_LENB; i++, j<<=1){
-		send_so(so_initb[i]);						// send a query message to each possible module
+		send_so(so_initb[i]);							// send a query message to each possible module
 		if(get_busy()){
-			ux_present_flags |= j;					// and set the present flag if the busy bit is active
+			ux_present_flags |= j;						// and set the present flag if the busy bit is active
 		}
 	}
+	ux_present_flags &= IDALL_B;						// mask known modules
 	// !!! need to trap exceptions here if only 1 or no modules present
 	//
-	// send init array 3 (base init)				// !!! this needs to get deprecated...
-	for(i=0; i<SO_INIT_LENC; i++){					// send a fixed init string to place base resources
-		send_so(so_initc[i]);						// into a known (if not relevant) state
+	// send init array 3 (base init)					// !!! this needs to get deprecated...
+/*	for(i=0; i<SO_INIT_LENC; i++){						// send a fixed init string to place base resources
+		send_so(so_initc[i]);							// into a known (if not relevant) state
 		wait(10);
-	}
+	}*/
 	// recall vfo NV data
 	recall_vfo();
 	// validate VFOs to validate NVRAM contents
 	k = TRUE;
 	for(i=ID10M_IDX; i<ID1200; i++){
-		if(vfo[i] > vfo_ulim[i]) k = FALSE;			// if VFO is out of limit, invalidate the NVRAM
-		if(vfo[i] < vfo_llim[i]) k = FALSE;
+		if(vfo_p[i].vfo > vfo_ulim[i]) k = FALSE;		// if VFO is out of limit, invalidate the NVRAM
+		if(vfo_p[i].vfo < vfo_llim[i]) k = FALSE;
 	}
-	if(!k) putsQ("NVRAMfail");						// display error msg to console
+	if(!k) putsQ("NVRAMfail");							// display error msg to console
 	rwusn_nvr(usnbuf, 0);
 	ii = (U16)usnbuf[14];
 	ii |= ((U16)usnbuf[15]) << 8;
@@ -196,83 +208,103 @@ U32 init_radio(void){
 		// future versions may call a "fixit" fn that updates an
 		// out-of-version NVRAM without deleting the existing config.
 		k = FALSE;
-		putsQ("USNfail");							// display error msg to console
+		putsQ("USNfail");								// display error msg to console
 	}
 	if(!k){
 		// Validation fail, stored VFO data corrupt: re-initialize...
-		putsQ("Initializing VFOS...");				// display status msg to console
+		// (nvram_fix(ii) is the function we need here.  Maybe someday...)
+		putsQ("Initializing VFOS...");					// display status msg to console
 
 		for(i=ID10M_IDX; i<NUM_VFOS; i++){
-			dplx[i] = DPLX_S | LOHI_F;				// duplex = S & low power
-			ctcss[i] = 0x0c;						// PL setting = 100.0
-			sq[i] = LEVEL_MAX-6;					// SQ setting
-			vol[i] = 20;							// vol setting
-			tsa[i] = 1;								// tsa/b defaults
-			tsb[i] = 2;
-			mem[i] = 0;
-			call[i] = CALL_MEM;
-			bflags[i] = 0xff;						// expansion flags
-			scanflags[i] = 0xff;					// scan flags (expansion)
-			vfo_tulim[i] = vfo_ulim[i];				// copy RX limits to TX
+			vfo_p[i].dplx = DPLX_S | LOHI_F;			// duplex = S & low power
+			vfo_p[i].ctcss = 0x0c;						// PL setting = 100.0
+			vfo_p[i].sq = LEVEL_MAX-6;					// SQ setting
+			vfo_p[i].vol = 20;							// vol setting
+			vfo_p[i].tsa = 1;							// tsa/b defaults
+			vfo_p[i].tsb = 2;
+			if(i<ID1200){
+				mem[i] = 0;
+				call[i] = CALL_MEM;
+			}
+			vfo_p[i].bflags = 0xff;						// expansion flags
+			vfo_p[i].scanflags = 0xff;					// scan flags (expansion)
+			vfo_tulim[i] = vfo_ulim[i];					// copy RX limits to TX
 			vfo_tllim[i] = vfo_llim[i];
-			memname[i][0] = '\0';					// init mem names
+			memname[i][0] = '\0';						// init mem names
 		}
-		vfo[ID10M_IDX] = 29100L;					// each band has a unique initial freq
-		vfo[ID6M_IDX] = 52525L;
-		vfo[ID2M_IDX] = 146520L;
-		vfo[ID220_IDX] = 223500L;
-		vfo[ID440_IDX] = 446000L;
-		vfo[ID1200_IDX] = 1270000L;
-		offs[ID10M_IDX] = 100;						// each band has a unique initial TX offset
-		offs[ID6M_IDX] = 1000;
-		offs[ID2M_IDX] = 600;
-		offs[ID220_IDX] = 1600;
-		offs[ID440_IDX] = 5000;
-		offs[ID1200_IDX] = 20000;
-		ux129_xit = 0;								// X/RIT settings
+		vfo_p[ID10M_IDX].vfo = 29100L;					// each band has a unique initial freq
+		vfo_p[ID6M_IDX].vfo = 52525L;
+		vfo_p[ID2M_IDX].vfo = 146520L;
+		vfo_p[ID220_IDX].vfo = 223500L;
+		vfo_p[ID440_IDX].vfo = 446000L;
+		vfo_p[ID1200_IDX].vfo = 1270000L;
+		vfo_p[ID10M_IDX].offs = 100;					// each band has a unique initial TX offset
+		vfo_p[ID6M_IDX].offs = 1000;
+		vfo_p[ID2M_IDX].offs = 600;
+		vfo_p[ID220_IDX].offs = 1600;
+		vfo_p[ID440_IDX].offs = 5000;
+		vfo_p[ID1200_IDX].offs = 20000;
+		// init temp vfos
+		vfo_p[ID10M_IDX+ID1200].vfo = 29100L;			// each band has a unique initial freq
+		vfo_p[ID6M_IDX+ID1200].vfo = 52525L;
+		vfo_p[ID2M_IDX+ID1200].vfo = 146520L;
+		vfo_p[ID220_IDX+ID1200].vfo = 223500L;
+		vfo_p[ID440_IDX+ID1200].vfo = 446000L;
+		vfo_p[ID1200_IDX+ID1200].vfo = 1270000L;
+		vfo_p[ID10M_IDX+ID1200].offs = 100;				// each band has a unique initial TX offset
+		vfo_p[ID6M_IDX+ID1200].offs = 1000;
+		vfo_p[ID2M_IDX+ID1200].offs = 600;
+		vfo_p[ID220_IDX+ID1200].offs = 1600;
+		vfo_p[ID440_IDX+ID1200].offs = 5000;
+		vfo_p[ID1200_IDX+ID1200].offs = 20000;
+		ux129_xit = 0;									// X/RIT settings
 		ux129_rit = 0;
+		clear_xmode();									// init xmode to no mem/call
+		push_vfo();										// push new data vfo to nvram (hib)
 		// init mems
-		putsQ("Initializing MEMS...");				// display status msg to console
-		push_vfo();									// push new data vfo to nvram (hib)
+		putsQ("Initializing MEMS...");					// display status msg to console
 		// copy default VFOs to memory space
 		for(bandid_m=ID10M_IDX; bandid_m<ID1200; bandid_m++){
 			for(i=0; i<NUM_MEMS; i++){
 				write_mem(MAIN, i);
 			}
 		}
-		bandid_m = BAND_ERROR;						// default to error, figure out assignment below...
+		bandid_m = BAND_ERROR;							// default to error, figure out assignment below...
 		bandid_s = BAND_ERROR;
 		ii = nvram_sn();
 		usnbuf[14] = (U8)ii;
 		usnbuf[15] = (U8)(ii >> 8);
-		rwusn_nvr(usnbuf, CS_WRITE);				// set version SN to validate version config
+		rwusn_nvr(usnbuf, CS_WRITE);					// set version SN to validate version config
 
 // debug presets !!!
-//		ux129_xit = 0xaa;							// debug...XIT setting (UX-129)
+//		ux129_xit = 0xaa;								// debug...XIT setting (UX-129)
 //		ux129_rit = 0x55;
-//		ctcss[ID2M_IDX] = 0x1a;						// PL setting = 162.2
-//		ctcss[ID440_IDX] = 0x10;					// PL setting = 114.8
+//		vfo_p[ID2M_IDX].ctcss = 0x1a;					// PL setting = 162.2
+//		vfo_p[ID440_IDX].ctcss = 0x10;					// PL setting = 114.8
 //		get_lohi(MAIN, 1);
 //		get_lohi(SUB, 1);
 	}
-	putsQ("Validate selected module...");			// display status msg to console
+	putsQ("Validate selected module...");				// display status msg to console
 	// double-check band-ids for validity against installed hardware
 	if(bandid_m != BAND_ERROR){
-		if(!(set_bit(bandid_m) & ux_present_flags)) bandid_m = BAND_ERROR;		// set main invalid if not present
-	}
-	if(bandid_s != BAND_ERROR){
-		if(!(set_bit(bandid_s) & ux_present_flags)) bandid_s = BAND_ERROR;		// set sub invalid if not present
+		if(!(set_bit(bandid_m) & ux_present_flags)) bandid_m = BAND_ERROR;			// set main invalid if not present
+//		bandid_s = BAND_ERROR);														// if main invalid, so is sub (will get reassigned below)
+	}else{
+		if(bandid_s != BAND_ERROR){
+			if(!(set_bit(bandid_s) & ux_present_flags)) bandid_s = BAND_ERROR;		// set sub invalid if not present
+		}
 	}
 	// re-assign active module if error
-	j = 0x01;										// start at lowest module
+	j = 0x01;											// start at lowest module
 	i = 0;
 	do{
-		if(j&ux_present_flags){						// pick first two modules present to be main/sub
-			if(bandid_m == BAND_ERROR){				// only try to assign if error
-				if(i != bandid_s) bandid_m = i;		// assign if not already taken by sub-band
-			}
-			else if(bandid_s == BAND_ERROR){		// only try to assign if error
-				if(i != bandid_m) bandid_s = i;		// assign if not already taken by main-band
+		if(j&ux_present_flags){							// pick first two modules present to be main/sub
+			if(bandid_m == BAND_ERROR){					// only try to assign if error
+				if(i != bandid_s) bandid_m = i;			// assign if not already taken by sub-band
+			}else{
+				if(bandid_s == BAND_ERROR){				// only try to assign if error
+					if(i != bandid_m) bandid_s = i;		// assign if not already taken by main-band
+				}
 			}
 		}
 		i++;
@@ -287,7 +319,11 @@ U32 init_radio(void){
 //		bandid_m = ID2M_IDX;	//!!! need to choose lowest 2 present modules
 //		bandid_s = ID440_IDX;
 //	ux_present_flags = 0x3f; //!!! force all modules on for debug
-	update_radio_all();								// force radio update
+	i = 0;
+	if(bandid_s == BAND_ERROR) i |= NO_SUX_PRSNT;
+	if(bandid_m == BAND_ERROR) i |= NO_MUX_PRSNT;
+	set_sys_err(i);
+	update_radio_all();									// force radio update
 	return 0;
 }
 
@@ -308,6 +344,7 @@ void  process_SIN(U8 cmd){
 		sin_data = get_sin();						// get'n check for SIN data
 		if((sin_data & SIN_STOP) == SIN_STOP){		// validate extended "stop" bits
 			sin_time(SIN_ACTIVITY);					// reset activity timer
+			clr_sys_err(NO_B_PRSNT);				// clear LOS error
 			if(sin_data & SIN_ADDR){				// process addr == 1 data
 				// ADDR 1
 				if(sin_data != sin_addr1){			// if data is new (different == new)
@@ -338,6 +375,7 @@ void  process_SIN(U8 cmd){
 			if(!sin_time(0)){
 				sin_flags |= SIN_SINACTO_F;			// set timeout error if activity timer expires
 													// !!! need to trap this condition and post an error message to LCD
+				set_sys_err(NO_B_PRSNT);
 			}
 		}
 	}
@@ -411,10 +449,10 @@ void  process_SOUT(U8 cmd){
 						break;
 
 					case SOUT_MVOL_N:													// process VOL/SQU triggers...
-						if(mute_band & MS_MUTE){
+						if((mute_band & MS_MUTE) || (bandid_m > ID1200_IDX)){
 							i = 0;														// 0 if muted
 						}else{
-							i = vol[bandid_m];
+							i = vfo_p[bandid_m].vol;
 						}
 						pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
 						pll_ptr = 0;
@@ -423,10 +461,10 @@ void  process_SOUT(U8 cmd){
 						break;
 
 					case SOUT_SVOL_N:
-						if(mute_band & SUB_MUTE){
+						if((mute_band & SUB_MUTE) || (bandid_s > ID1200_IDX)){
 							i = 0;
 						}else{
-							i = vol[bandid_s];
+							i = vfo_p[bandid_s].vol;
 						}
 						pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
 						pll_ptr = 0;
@@ -435,21 +473,21 @@ void  process_SOUT(U8 cmd){
 						break;
 
 					case SOUT_MSQU_N:
-						pll_buf[0] = atten_calc(sq[bandid_m]) | ATTEN_MAIN | SQU_ADDR;
+						pll_buf[0] = atten_calc(vfo_p[bandid_m].sq) | ATTEN_MAIN | SQU_ADDR;
 						pll_ptr = 0;
 						sout_flags &= ~SOUT_MSQU_F;										// clear signal flag
 						pll_buf[1] = 0xffffffffL;
 						break;
 
 					case SOUT_SSQU_N:
-						pll_buf[0] = atten_calc(sq[bandid_s]) | ATTEN_SUB | SQU_ADDR;
+						pll_buf[0] = atten_calc(vfo_p[bandid_s].sq) | ATTEN_SUB | SQU_ADDR;
 						pll_ptr = 0;
 						sout_flags &= ~SOUT_SSQU_F;										// clear signal flag
 						pll_buf[1] = 0xffffffffL;
 						break;
 
 					case SOUT_TONE_N:													// send tone message
-						pll_buf[0] = (U32)ctcss[bandid_m] | TONE_ADDR;
+						pll_buf[0] = (U32)vfo_p[bandid_m].ctcss | TONE_ADDR;
 						pll_ptr = 0;
 						pll_buf[1] = 0xffffffffL;
 						sout_flags &= ~SOUT_TONE_F;										// clear signal flag
@@ -525,29 +563,58 @@ void  save_vfo(U8 b_id){
 	}else{
 		startid = b_id;
 		stopid = b_id + 1;
+		if((get_xmode(b_id) & (MC_XFLAG)) && (b_id < ID1200)){
+			// if call or mem mode, just save mem/call#:
+			j = SQ_0 + (VFO_LEN * startid);						// set start @ squ
+			rw8_nvr(j, vfo_p[startid].sq, CS_WRITE|CS_OPEN);	// save squ and vol
+			rw8_nvr(j, vfo_p[startid].vol, CS_WRITE|CS_CLOSE);
+			return;												// exit now...
+		}
 	}
 	// combine VFO/offset into single 32 bit value
 	k = CS_WRITE | CS_OPEN;
 	for(i=startid, j=VFO_0 + (VFO_LEN * startid); i<stopid; i++){
-		rw32_nvr(j, vfo[i], k);							// write each element of the band state in sequence
+		rw32_nvr(j, vfo_p[i].vfo, k);							// write each element of the band state in sequence
 		k = CS_WRITE;									// the addr (j) only matters for first call in an "OPEN" sequence.  So...
-		rw16_nvr(j, offs[i], k);						// we don't update it here (the NVRAM increments it automatically).  Saves
-		rw8_nvr(j, dplx[i], k);							// a lot of SPI clock cycles.
-		rw8_nvr(j, ctcss[i], k);
-		rw8_nvr(j, tsa[i], k);
-		rw8_nvr(j, tsb[i], k);
-		rw8_nvr(j, sq[i], k);
-		rw8_nvr(j, vol[i], k);
-		rw8_nvr(j, mem[i], k);
-		rw8_nvr(j, call[i], k);
-		rw8_nvr(j, bflags[i], k);
+														// we don't update it here (the NVRAM increments it automatically).  Saves
+		rw16_nvr(j, vfo_p[i].offs, k);						// a lot of SPI clock cycles.
+		rw8_nvr(j, vfo_p[i].dplx, k);
+		rw8_nvr(j, vfo_p[i].ctcss, k);
+		rw8_nvr(j, vfo_p[i].sq, k);
+		rw8_nvr(j, vfo_p[i].vol, k);
+		if(i >= ID1200){
+			rw8_nvr(j, mem[i-ID1200], k);
+			rw8_nvr(j, call[i-ID1200], k);
+		}else{
+			rw8_nvr(j, mem[i], k);
+			rw8_nvr(j, call[i], k);
+		}
+		rw8_nvr(j, vfo_p[i].bflags, k);
+		rw8_nvr(j, vfo_p[i].scanflags, k);
+		rw8_nvr(j, vfo_p[i].tsa, k);
 		if(i == (stopid - 1)) k |= CS_CLOSE;
-		rw8_nvr(j, scanflags[i], k);
+		rw8_nvr(j, vfo_p[i].tsb, k);
 	}
 	rw8_nvr(XIT_0, ux129_xit, CS_WRITE | CS_OPEN);
 	rw8_nvr(RIT_0, ux129_rit, CS_WRITE);
 	rw8_nvr(BIDM_0, bandid_m, CS_WRITE);
 	rw8_nvr(BIDS_0, bandid_s, CS_WRITE | CS_CLOSE);
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// save_mc() copies mem/call to NVRAM
+//	call this fn anytime mem or call # changes
+//-----------------------------------------------------------------------------
+void  save_mc(U8 focus){
+	U32	j;
+	U8	i;
+
+	if(focus == MAIN) i = bandid_m;
+	else i = bandid_s;
+	j=MEM_0 + (VFO_LEN * i);
+	rw8_nvr(j, mem[i], CS_WRITE | CS_OPEN);			// mem & call are adjacent in the NV map
+	rw8_nvr(j, call[i], CS_WRITE | CS_CLOSE);
 	return;
 }
 
@@ -566,25 +633,31 @@ void  recall_vfo(void){
 	stopid = NUM_VFOS;
 	k = CS_OPEN;
 	for(i=startid, j=VFO_0; i<stopid; i++){
-		vfo[i] = rw32_nvr(j, 0, k);
+		vfo_p[i].vfo = rw32_nvr(j, 0, k);
 		k = CS_IDLE;
-		offs[i] = rw16_nvr(j, 0, k);
-		dplx[i] = rw8_nvr(j, 0, k);
-		ctcss[i] = rw8_nvr(j, 0, k);
-		tsa[i] = rw8_nvr(j, 0, k);
-		tsb[i] = rw8_nvr(j, 0, k);
-		sq[i] = rw8_nvr(j, 0, k);
-		vol[i] = rw8_nvr(j, 0, k);
-		mem[i] = rw8_nvr(j, mem[i], k);
-		call[i] = rw8_nvr(j, 0, k);
-		bflags[i] = rw8_nvr(j, 0, k);
+		vfo_p[i].offs = rw16_nvr(j, 0, k);
+		vfo_p[i].dplx = rw8_nvr(j, 0, k);
+		vfo_p[i].ctcss = rw8_nvr(j, 0, k);
+		vfo_p[i].sq = rw8_nvr(j, 0, k);
+		vfo_p[i].vol = rw8_nvr(j, 0, k);
+		if(i < ID1200){
+			mem[i] = rw8_nvr(j, mem[i], k);
+			call[i] = rw8_nvr(j, 0, k);
+		}else{
+			rw8_nvr(j, mem[i], k);						// dummy reads
+			rw8_nvr(j, 0, k);
+		}
+		vfo_p[i].bflags = rw8_nvr(j, 0, k);
+		vfo_p[i].scanflags = rw8_nvr(j, 0, k);
+		vfo_p[i].tsa = rw8_nvr(j, 0, k);
 		if(i == (stopid - 1)) k |= CS_CLOSE;
-		scanflags[i] = rw8_nvr(j, 0, k);
+		vfo_p[i].tsb = rw8_nvr(j, 0, k);
 	}
 	ux129_xit = rw8_nvr(XIT_0, 0, CS_OPEN);
 	ux129_rit = rw8_nvr(RIT_0, 0, CS_IDLE);
 	bandid_m = rw8_nvr(BIDM_0, 0, CS_IDLE);
 	bandid_s = rw8_nvr(BIDS_0, 0, CS_CLOSE);
+	read_xmode();
 
 
 
@@ -599,36 +672,36 @@ void  recall_vfo(void){
 //			ii = rdhib_ram(j);
 //		}
 		ii = rdwhib_ram(j);
-		vfo[i] = (ii & 0x3ffff) * 5;
-		offs[i] = (ii >> 18) * 5;
+		vfo_p[i].vfo = (ii & 0x3ffff) * 5;
+		vfo_p[i].offs = (ii >> 18) * 5;
 	}
 	j *= 4;
 	for(i=0; i<LEN_ARY; i++, j++){				// duplex/hilo
-		dplx[i] = rdhib_ram(j);
+		vfo_p[i].dplx = rdhib_ram(j);
 	}
 	for(i=0; i<LEN_ARY; i++, j++){
-		ctcss[i] = rdhib_ram(j);				// PL
+		vfo_p[i].ctcss = rdhib_ram(j);				// PL
 	}
 	for(i=0; i<LEN_ARY; i++, j++){
-		sq[i] = rdhib_ram(j);					// squ
+		vfo_p[i].sq = rdhib_ram(j);					// squ
 	}
 	for(i=0; i<LEN_ARY; i++, j++){				// tstep a/b
 		k = rdhib_ram(j);
-		tsa[i] = k & 0x0f;
-		tsb[i] = k >> 4;
+		vfo_p[i].tsa = k & 0x0f;
+		vfo_p[i].tsb = k >> 4;
 	}
 	for(i=0; i<LEN_ARY; i++, j++){
 		mem[i] = rdhib_ram(j);					// mem#
 	}
 	k = rdhib_ram(j++);							// vol main
 	for(i=0; i<LEN_ARY; i++){
-		vol[i] = k;								// fill all vol with stored main
+		vfo_p[i].vol = k;								// fill all vol with stored main
 	}
 	i = rdhib_ram(j++);							// sub vol...
 	k = rdhib_ram(j++);							// bandids
 	bandid_m = k & 0x0f;						// break out bandids
 	bandid_s = k >> 4;
-	vol[bandid_s] = i;							// ... store nvram sub vol to (new) sub band
+	vfo_p[bandid_s].vol = i;							// ... store nvram sub vol to (new) sub band
 	k = rdhib_ram(j);							// bandids
 	ux129_xit = k & 0x0f;						// break out xit/rit
 	ux129_rit = k >> 4;*/
@@ -646,26 +719,26 @@ void  recall_vfo(void){
 
 	// VFO/offset
 	for(i=0; i<LEN_VFO_ARY; i++){
-		ii = vfo[i]/5 | ((offs[i]/5) << 18);
+		ii = vfo_p[i].vfo/5 | ((vfo_p[i].offs/5) << 18);
 		for(j=0; j<4; j++){
 			crc = calcrc((U8)(ii & 0xffL), crc);
 			ii >>= 4;
 		}
 	}
 	for(i=0; i<LEN_ARY; i++){
-		crc = calcrc(dplx[i], crc);
+		crc = calcrc(vfo_p[i].dplx, crc);
 	}
 	for(i=0; i<LEN_ARY; i++){
-		crc = calcrc(ctcss[i], crc);
+		crc = calcrc(vfo_p[i].ctcss, crc);
 	}
 	for(i=0; i<LEN_ARY; i++){
-		crc = calcrc(sq[i], crc);
+		crc = calcrc(vfo_p[i].sq, crc);
 	}
 	for(i=0; i<LEN_ARY; i++){
-		crc = calcrc(vol[i], crc);
+		crc = calcrc(vfo_p[i].vol, crc);
 	}
 	for(i=0; i<LEN_ARY; i++){
-		crc = calcrc((tsa[i] & 0x0f) | (tsb[i] >> 4), crc);
+		crc = calcrc((vfo_p[i].tsa & 0x0f) | (vfo_p[i].tsb >> 4), crc);
 	}
 	i = bandid_m | (bandid_s << 4);			// combine bandid
 	crc = calcrc(i, crc);
@@ -762,7 +835,7 @@ void  vfo_change(U8 band){
 //-----------------------------------------------------------------------------
 void  update_radio_all(void){
 
-	sin_flags = SIN_SQS_F|SIN_MSRF_F|SIN_SSRF_F|SIN_SEND_F|SIN_DSQ_F|SIN_MCK_F|SIN_SEL_F|SIN_VFOM_F|SIN_VFOS_F;
+	sin_flags = SIN_SQS_F|SIN_MSRF_F|SIN_SSRF_F|SIN_SEND_F|SIN_DSQ_F|SIN_SEL_F|SIN_VFOM_F|SIN_VFOS_F;
 	sout_flags = SOUT_TONE_F|SOUT_MSQU_F|SOUT_SSQU_F|SOUT_MVOL_F|SOUT_SVOL_F|SOUT_VFOS_F|SOUT_VFOM_F;
 	return;
 }
@@ -854,27 +927,27 @@ U8 adjust_squ(U8 mainsub, S8 value){
 		i = value & 0x3f;								// mask flags
 		if(i > LEVEL_MAX) i = LEVEL_MAX;
 		if(mainsub){
-			sq[bandid_m] = i;							// store main
-			j = sq[bandid_m];
+			vfo_p[bandid_m].sq = i;							// store main
+			j = vfo_p[bandid_m].sq;
 			sout_flags |= SOUT_MSQU_F;					// send signal to update B-unit
 		}else{
-			sq[bandid_s] = i;							// store sub
-			j = sq[bandid_s];
+			vfo_p[bandid_s].sq = i;							// store sub
+			j = vfo_p[bandid_s].sq;
 			sout_flags |= SOUT_SSQU_F;					// send signal to update B-unit
 		}
 	}else{
 		i = value;										// +/- branch
 		if(mainsub){
-			sq[bandid_m] += i;							// adjust main +/-
-			if(sq[bandid_m] > 0x7f) sq[bandid_m] = 0;
-			if(sq[bandid_m] > LEVEL_MAX) sq[bandid_m] = LEVEL_MAX;
-			j = sq[bandid_m];
+			vfo_p[bandid_m].sq += i;							// adjust main +/-
+			if(vfo_p[bandid_m].sq > 0x7f) vfo_p[bandid_m].sq = 0;
+			if(vfo_p[bandid_m].sq > LEVEL_MAX) vfo_p[bandid_m].sq = LEVEL_MAX;
+			j = vfo_p[bandid_m].sq;
 			if(value != 0) sout_flags |= SOUT_MSQU_F;	// send signal to update B-unit
 		}else{
-			sq[bandid_s] += i;							// adjust sub +/-
-			if(sq[bandid_s] > 0x7f) sq[bandid_s] = 0;
-			if(sq[bandid_s] > LEVEL_MAX) sq[bandid_s] = LEVEL_MAX;
-			j = sq[bandid_s];
+			vfo_p[bandid_s].sq += i;							// adjust sub +/-
+			if(vfo_p[bandid_s].sq > 0x7f) vfo_p[bandid_s].sq = 0;
+			if(vfo_p[bandid_s].sq > LEVEL_MAX) vfo_p[bandid_s].sq = LEVEL_MAX;
+			j = vfo_p[bandid_s].sq;
 			if(value != 0) sout_flags |= SOUT_SSQU_F;	// send signal to update B-unit
 		}
 	}
@@ -889,27 +962,27 @@ U8 adjust_vol(U8 mainsub, S8 value){
 		i = value & 0x3f;								// mask flags
 		if(i > LEVEL_MAX) i = LEVEL_MAX;
 		if(mainsub){
-			vol[bandid_m] = i;							// store main
-			j = vol[bandid_m];
+			vfo_p[bandid_m].vol = i;							// store main
+			j = vfo_p[bandid_m].vol;
 			sout_flags |= SOUT_MVOL_F;					// send signal to update B-unit
 		}else{
-			vol[bandid_s] = i;							// store sub
-			j = vol[bandid_s];
+			vfo_p[bandid_s].vol = i;							// store sub
+			j = vfo_p[bandid_s].vol;
 			sout_flags |= SOUT_SVOL_F;					// send signal to update B-unit
 		}
 	}else{
 		i = value;										// +/- branch
 		if(mainsub){
-			vol[bandid_m] += i;							// adjust main +/-
-			if(vol[bandid_m] > 0x7f) vol[bandid_m] = 0;
-			if(vol[bandid_m] > LEVEL_MAX) vol[bandid_m] = LEVEL_MAX;
-			j = vol[bandid_m];
+			vfo_p[bandid_m].vol += i;							// adjust main +/-
+			if(vfo_p[bandid_m].vol > 0x7f) vfo_p[bandid_m].vol = 0;
+			if(vfo_p[bandid_m].vol > LEVEL_MAX) vfo_p[bandid_m].vol = LEVEL_MAX;
+			j = vfo_p[bandid_m].vol;
 			if(value != 0) sout_flags |= SOUT_MVOL_F;	// send signal to update B-unit
 		}else{
-			vol[bandid_s] += i;							// adjust sub +/-
-			if(vol[bandid_s] > 0x7f) vol[bandid_s] = 0;
-			if(vol[bandid_s] > LEVEL_MAX) vol[bandid_s] = LEVEL_MAX;
-			j = vol[bandid_s];
+			vfo_p[bandid_s].vol += i;							// adjust sub +/-
+			if(vfo_p[bandid_s].vol > 0x7f) vfo_p[bandid_s].vol = 0;
+			if(vfo_p[bandid_s].vol > LEVEL_MAX) vfo_p[bandid_s].vol = LEVEL_MAX;
+			j = vfo_p[bandid_s].vol;
 			if(value != 0) sout_flags |= SOUT_SVOL_F;	// send signal to update B-unit
 		}
 	}
@@ -930,33 +1003,33 @@ U8 adjust_tone(U8 mainsub, S8 value){
 		i = value & 0x3f;										// mask flags
 		if(i > TONE_MAX) i = TONE_MAX;
 		if(mainsub){
-			k = ctcss[bandid_m] & (~CTCSS_MASK);				// mask control bits
-			ctcss[bandid_m] = i | k;							// store main
-			j = ctcss[bandid_m];
+			k = vfo_p[bandid_m].ctcss & (~CTCSS_MASK);				// mask control bits
+			vfo_p[bandid_m].ctcss = i | k;							// store main
+			j = vfo_p[bandid_m].ctcss;
 			sout_flags |= SOUT_TONE_F;							// send signal to update B-unit
 		}else{
-			k = ctcss[bandid_s] & (~CTCSS_MASK);				// mask control bits
-			ctcss[bandid_s] = i | k;							// store sub
-			j = ctcss[bandid_s];
+			k = vfo_p[bandid_s].ctcss & (~CTCSS_MASK);				// mask control bits
+			vfo_p[bandid_s].ctcss = i | k;							// store sub
+			j = vfo_p[bandid_s].ctcss;
 //			sout_flags |= SOUT_TONE_F;							// send signal to update B-unit
 		}
 	}else{
 		i = value;												// +/- branch
 		if(mainsub){
-			k = ctcss[bandid_m] & CTCSS_MASK;
+			k = vfo_p[bandid_m].ctcss & CTCSS_MASK;
 			k += i;
 			if(k > TONE_MAX) k = 1;								// wrap-around
 			if((k > CTCSS_MASK) || (k == 0)) k = TONE_MAX;
-			j = (ctcss[bandid_m] & (~CTCSS_MASK)) | k;			// adjust main +/-
-			ctcss[bandid_m] = j;
+			j = (vfo_p[bandid_m].ctcss & (~CTCSS_MASK)) | k;			// adjust main +/-
+			vfo_p[bandid_m].ctcss = j;
 			if(!value) sout_flags |= SOUT_TONE_F;				// send signal to update B-unit
 		}else{
-			k = ctcss[bandid_s] & CTCSS_MASK;
+			k = vfo_p[bandid_s].ctcss & CTCSS_MASK;
 			k += i;
 			if(k > TONE_MAX) k = 1;								// wrap-around
 			if((k > CTCSS_MASK) || (k == 0)) k = TONE_MAX;
-			j = (ctcss[bandid_s] & (~CTCSS_MASK)) | k;			// adjust sub +/-
-			ctcss[bandid_s] = j;
+			j = (vfo_p[bandid_s].ctcss & (~CTCSS_MASK)) | k;			// adjust sub +/-
+			vfo_p[bandid_s].ctcss = j;
 			if(!value) sout_flags |= SOUT_TONE_F;				// send signal to update B-unit
 		}
 	}
@@ -973,25 +1046,25 @@ U8 adjust_toneon(U8 mainsub, U8 value){
 
 	if(value == 0xff){									// read setting
 		if(mainsub){
-			if(ctcss[bandid_m] & CTCSS_OFF) j = 0;
+			if(vfo_p[bandid_m].ctcss & CTCSS_OFF) j = 0;
 			else j = 1;
 		}else{
-			if(ctcss[bandid_s] & CTCSS_OFF) j = 0;
+			if(vfo_p[bandid_s].ctcss & CTCSS_OFF) j = 0;
 			else j = 1;
 		}
 	}else{
 		if(mainsub){
 			if(value){
-				ctcss[bandid_m] &= ~CTCSS_OFF;			// turn on
+				vfo_p[bandid_m].ctcss &= ~CTCSS_OFF;			// turn on
 			}else{
-				ctcss[bandid_m] |= CTCSS_OFF;			// turn off
+				vfo_p[bandid_m].ctcss |= CTCSS_OFF;			// turn off
 			}
 			sout_flags |= SOUT_TONE_F;					// send signal to update B-unit
 		}else{
 			if(value){
-				ctcss[bandid_s] &= ~CTCSS_OFF;			// turn on
+				vfo_p[bandid_s].ctcss &= ~CTCSS_OFF;			// turn on
 			}else{
-				ctcss[bandid_s] |= CTCSS_OFF;			// turn off
+				vfo_p[bandid_s].ctcss |= CTCSS_OFF;			// turn off
 			}
 //			sout_flags |= SOUT_TONE_F;					// send signal to update B-unit
 		}
@@ -1030,34 +1103,34 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
 #define SOUT_PTT	0x00200000L	// band unit PTT
 */
 
-    band_idr = get_bandid(vfo[bid] / 1000L);			// use vfo frequency to determine band ID
+    band_idr = get_bandid(vfo_p[bid].vfo / 1000L);		// use vfo frequency to determine band ID
     ux_noptt = band_idr << 27;							// align band ID in SOUT proto word
     if(is_main){
     	ux_noptt |= SOUT_MAIN | SOUT_PON;				// set module pre-amble bits (main)
     }else{
     	ux_noptt |= SOUT_SUB | SOUT_PON;				// .. (sub)
     }
-    if(dplx[bid] & LOHI_F){
+    if(vfo_p[bid].dplx & LOHI_F){
     	ux_noptt |= SOUT_LOHI;							// set RF power level
     }
     ux_ptt = ux_noptt | SOUT_PTT;						// set PTT in is_tx proto word
     if(is_tx){
-    	switch(dplx[bid] & (DPLX_P|DPLX_M)){			// calculate TX frequency (if is_tx)
+    	switch(vfo_p[bid].dplx & (DPLX_P|DPLX_M)){		// calculate TX frequency (if is_tx)
     	default:
     	case DPLX_S:
-    		vfotr = vfo[bid];
+    		vfotr = vfo_p[bid].vfo;
     		break;
 
     	case DPLX_M:
-    		vfotr = vfo[bid] - (U32)offs[bid];
+    		vfotr = vfo_p[bid].vfo - (U32)vfo_p[bid].offs;
     		break;
 
     	case DPLX_P:
-    		vfotr = vfo[bid] + (U32)offs[bid];
+    		vfotr = vfo_p[bid].vfo + (U32)vfo_p[bid].offs;
     		break;
     	}
     }else{
-    	vfotr = vfo[bid];								// no TX, no calc needed
+    	vfotr = vfo_p[bid].vfo;							// no TX, no calc needed
     }
     if(is_tx) sout_flags |= SOUT_TONE_F;				// trigger tone update if TX
     //
@@ -1256,11 +1329,11 @@ U8 inc_dplx(U8 main){
 
     if(main) i = bandid_m;						// select duplex to modify
     else i = bandid_s;
-    dplx[i] += DPLX_P;							// increment to next duplex ordinal
-    if((dplx[i] & (DPLX_P|DPLX_M)) == (DPLX_P|DPLX_M)){
-    	dplx[i] &= ~(DPLX_P|DPLX_M);			// roll over duplex
+    vfo_p[i].dplx += DPLX_P;							// increment to next duplex ordinal
+    if((vfo_p[i].dplx & (DPLX_P|DPLX_M)) == (DPLX_P|DPLX_M)){
+    	vfo_p[i].dplx &= ~(DPLX_P|DPLX_M);			// roll over duplex
     }
-    return dplx[i];
+    return vfo_p[i].dplx;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1272,7 +1345,7 @@ U8 read_dplx(U8 main){
 
     if(main) i = bandid_m;						// select duplex (m/s) to modify
     else i = bandid_s;
-    return dplx[i];
+    return vfo_p[i].dplx;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1286,9 +1359,9 @@ void set_ab(U8 main, U8 tf){
     if(main) i = bandid_m;						// select register (m/s) to modify
     else i = bandid_s;
     if(tf){
-    	dplx[i] |= TSA_F;						// set index
+    	vfo_p[i].dplx |= TSA_F;						// set index
     }else{
-    	dplx[i] &= ~TSA_F;						// clear index
+    	vfo_p[i].dplx &= ~TSA_F;						// clear index
     }
     return;
 }
@@ -1302,8 +1375,8 @@ U8 read_tsab(U8 main, U8 absel){
 
 	if(main) i = bandid_m;						// select rean Main or Sub
 	else i = bandid_s;
-	if(absel == TSA_SEL) return tsa[i];
-	return tsb[i];
+	if(absel == TSA_SEL) return vfo_p[i].tsa;
+	return vfo_p[i].tsb;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1315,8 +1388,8 @@ void set_tsab(U8 main, U8 absel, U8 value){
 
 	if(main) i = bandid_m;						// select duplex to modify
 	else i = bandid_s;
-	if(absel == TSA_SEL) tsa[i] = value;
-	else tsb[i] = value;
+	if(absel == TSA_SEL) vfo_p[i].tsa = value;
+	else vfo_p[i].tsb = value;
 	return;
 }
 
@@ -1336,8 +1409,50 @@ S32 set_mhz_step(S32 sval){
 //-----------------------------------------------------------------------------
 // is_mic_updn() returns 0 if no button, -1 if dn, +1 if up
 //-----------------------------------------------------------------------------
-S8 is_mic_updn(void){
-    S8	i = 0;		// return value (no button)
+S8 is_mic_updn(U8 ipl){
+	static	S8	i;			// return value
+	static	U8	click_mem;	// button pressed memory
+			S8	rtn = 0;
+
+	if(ipl){
+		i = 0;				// init statics
+		click_mem = 0;
+		return 0;
+	}
+	if(sin_flags & SIN_MCK_F){								// if edge flag...
+		if(sin_addr1 & SIN_MCK){							// u/d "clock" active
+			micdb_time(1);									// set debounce timer
+			i = 0;											// clear statics
+			click_mem = 0;
+		}
+		read_sin_flags(SIN_MCK_F);
+	}else{
+		if(!click_mem){
+			if((!micdb_time(0)) && (sin_addr1 & SIN_MCK)){
+				mic_time(2);								// set long gap time for first press
+		    	if((sin_addr1 & (SIN_MUP | SIN_MCK)) == (SIN_MUP | SIN_MCK)){
+		    		i = 1;									// if up button pressed, set +
+		    	}
+		    	if((sin_addr1 & (SIN_MUP | SIN_MCK)) == (SIN_MCK)){
+		    		i = -1;									// if dn button pressed, set -
+		    	}
+	    		do_dial_beep();								// beep
+	    		click_mem = 1;
+				rtn = i;
+			}
+		}else{
+			if((!mic_time(0)) && (sin_addr1 & SIN_MCK)){
+				mic_time(1);								// set short gap time for hold press
+	    		do_dial_beep();								// beep
+				rtn = i;
+			}
+		}
+	}
+	return rtn;
+
+
+
+/*    S8	i = 0;		// return value (no button)
 
     // repeat u/d if button is held for 1+ sec.  abt 100ms rep rate
 	if(sin_addr1 & SIN_MCK){
@@ -1370,7 +1485,7 @@ S8 is_mic_updn(void){
 	    	read_sin_flags(SIN_MCK_F);						// if dn during debounce, ignore and clear flag
     	}
 	}
-   return i;
+   return i;*/
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1388,7 +1503,7 @@ S8 add_vfo(U8 main, S8 adder, U8 daddr){
 	if(main) i = bandid_m;									// get band id for current focus
 	else i = bandid_s;
 	if(daddr & MHZ_OFFS){									// offset adjust: always uses thumbwheel mode
-		vfot = (U32)offs[i];								// copy to vfot
+		vfot = (U32)vfo_p[i].offs;								// copy to vfot
 		bin32_bcds(vfot, bbuf);								// convert to bcd in bbuf
 		add_bcds(bbuf, adder, daddr & MHZ_MASK, 9, 0);		// add/subtract digit
 		vfot = bcds_bin32(bbuf);
@@ -1396,7 +1511,7 @@ S8 add_vfo(U8 main, S8 adder, U8 daddr){
 		if(vfot > offs_ulim[i]){
 			vfot -=  offs_ulim[i];
 		}
-		offs[i] = (U16)vfot;
+		vfo_p[i].offs = (U16)vfot;
 	}else{
 		if(daddr < MHZ_OFF){								// no mode flags set, this means we are in Thumbwheel mode and daddr selects the digit to be modified
 			bin32_bcds(vfot, bbuf);							// convert to BCD string (one BCD nybble per sting byte)
@@ -1408,24 +1523,24 @@ S8 add_vfo(U8 main, S8 adder, U8 daddr){
 			if(vfot < vfo_llim[i]){
 				vfot +=  vfo_ulim[i] - vfo_llim[i];
 			}
-			vfo[i] = vfot;									// update target VFO
+			vfo_p[i].vfo = vfot;									// update target VFO
 		}else{
 			if(daddr == MHZ_OFF){							// not MHz mode, adjust using freq step (a or b) setting
-				if(dplx[i] & TSA_F){
-					delta = (S32)(tsb[i] & 0x07) * 5L;
+				if(vfo_p[i].dplx & TSA_F){
+					delta = (S32)(vfo_p[i].tsb & 0x07) * 5L;
 				}else{
-					delta = (S32)(tsa[i] & 0x07) * 5L;
+					delta = (S32)(vfo_p[i].tsa & 0x07) * 5L;
 				}
-				vfo[i] += delta * (S32)adder;
+				vfo_p[i].vfo += delta * (S32)adder;
 			}
 			if(daddr == MHZ_ONE){							// MHz mode, adjust +/- MHz increments
-				vfo[i] += 1000 * (S32)adder;
+				vfo_p[i].vfo += 1000 * (S32)adder;
 			}
-			if(vfo[i] > vfo_ulim[i]){						// same roll-over/under as above
-				vfo[i] -= vfo_ulim[i] - vfo_llim[i];
+			if(vfo_p[i].vfo > vfo_ulim[i]){						// same roll-over/under as above
+				vfo_p[i].vfo -= vfo_ulim[i] - vfo_llim[i];
 			}
-			if(vfo[i] < vfo_llim[i]){
-				vfo[i] += vfo_ulim[i] - vfo_llim[i];
+			if(vfo_p[i].vfo < vfo_llim[i]){
+				vfo_p[i].vfo += vfo_ulim[i] - vfo_llim[i];
 			}
 		}
 	}
@@ -1454,8 +1569,8 @@ U32 get_freq(U8 main){
 	if(main & VMODE_ISTX){
 		return vfotr;
 	}else{
-	    if(main) return vfo[bandid_m];
-	    else return vfo[bandid_s];
+	    if(main) return vfo_p[bandid_m].vfo;
+	    else return vfo_p[bandid_s].vfo;
 	}
 }
 
@@ -1465,8 +1580,8 @@ U32 get_freq(U8 main){
 //-----------------------------------------------------------------------------
 void copy_vfot(U8 main){
 
-    if(main) vfo[bandid_m] = vfot;
-    else vfo[bandid_s] = vfot;
+    if(main) vfo_p[bandid_m].vfo = vfot;
+    else vfo_p[bandid_s].vfo = vfot;
     return;
 }
 
@@ -1476,8 +1591,8 @@ void copy_vfot(U8 main){
 //-----------------------------------------------------------------------------
 void temp_vfo(U8 main){
 
-    if(main) vfot = vfo[bandid_m];
-    else vfot = vfo[bandid_s];
+    if(main) vfot = vfo_p[bandid_m].vfo;
+    else vfot = vfo_p[bandid_s].vfo;
     return;
 }
 
@@ -1495,24 +1610,22 @@ U32 get_vfot(void){
 // get_memnum() adds "adder" and then returns mem# for main or sub band
 //-----------------------------------------------------------------------------
 U8 get_memnum(U8 main, U8 adder){
-	U8	i;
+	U8	k;
 
 	if(main == MAIN){
-		if(mem[bandid_m] < MAX_MEM){
-			mem[bandid_m] += adder;
-			if(mem[bandid_m] > 0x80) mem[bandid_m] = MAX_MEM - 1;
-			if(mem[bandid_m] >= MAX_MEM) mem[bandid_m] = 0;
-		}
-		i = mem[bandid_m];
+		k = bandid_m;
 	}else{
-		if(mem[bandid_s] < MAX_MEM){
-			mem[bandid_s] += adder;
-			if(mem[bandid_s] > 0x80) mem[bandid_s] = MAX_MEM - 1;
-			if(mem[bandid_s] >= MAX_MEM) mem[bandid_s] = 0;
-		}
-		i = mem[bandid_s];
+		k = bandid_s;
 	}
-	return i;
+	if(mem[k] >= MAX_MEM){
+		mem[k] = 0;								// error fix
+	}
+	if((mem[k] < MAX_MEM) && (adder != 0)){
+		mem[k] += adder;
+		if(mem[k] > 0x80) mem[k] = MAX_MEM - 1;
+		if(mem[k] >= MAX_MEM) mem[k] = 0;
+	}
+	return mem[k];
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1520,28 +1633,23 @@ U8 get_memnum(U8 main, U8 adder){
 // get_callnum() adds "adder" and then returns mem# for main or sub band
 //-----------------------------------------------------------------------------
 U8 get_callnum(U8 main, U8 adder){
-	U8	i;
+	U8	k;
 
 	if(main == MAIN){
-		if((call[bandid_m] < MAX_MEM) || (call[bandid_m] >= NUM_MEMS)){
-			call[bandid_m] = CALL_MEM;
-		}else{
-			call[bandid_m] += adder;
-			if(call[bandid_m] >= NUM_MEMS) call[bandid_m] = CALL_MEM;
-			if(call[bandid_m] < CALL_MEM) call[bandid_m] = NUM_MEMS - 1;
-		}
-		i = call[bandid_m];
+		k = bandid_m;
 	}else{
-		if((call[bandid_s] < MAX_MEM) || (call[bandid_s] >= NUM_MEMS)){
-			call[bandid_s] = CALL_MEM;
-		}else{
-			call[bandid_s] += adder;
-			if(call[bandid_s] >= NUM_MEMS) call[bandid_s] = CALL_MEM;
-			if(call[bandid_s] < CALL_MEM) call[bandid_s] = NUM_MEMS - 1;
-		}
-		i = call[bandid_s];
+		k = bandid_s;
 	}
-	return i;
+	if(adder != 0){
+		if((call[k] < MAX_MEM) || (call[k] >= NUM_MEMS)){
+			call[k] = CALL_MEM;
+		}else{
+			call[k] += adder;
+			if(call[k] >= NUM_MEMS) call[k] = CALL_MEM;
+			if(call[k] < CALL_MEM) call[k] = NUM_MEMS - 1;
+		}
+	}
+	return call[k];
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1556,12 +1664,12 @@ U8 get_lohi(U8 main, U8 setread){
 	else i = bandid_s;
     if(setread != 0xff){
     	if(setread){
-    		dplx[i] |= LOHI_F;
+    		vfo_p[i].dplx |= LOHI_F;
     	}else{
-    		dplx[i] &= ~LOHI_F;
+    		vfo_p[i].dplx &= ~LOHI_F;
     	}
     }
-    return dplx[i] & LOHI_F;
+    return vfo_p[i].dplx & LOHI_F;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1688,9 +1796,9 @@ U8 bit_set(U8 value){
 void set_offs(U8 focus, U16 value){
 
 	if(focus == MAIN){
-		offs[bandid_m] = value;
+		vfo_p[bandid_m].offs = value;
 	}else{
-		offs[bandid_s] = value;
+		vfo_p[bandid_s].offs = value;
 	}
 	return;
 }
@@ -1703,9 +1811,9 @@ U16 get_offs(U8 focus){
 	U16	i;	// temp
 
 	if(focus == MAIN){
-		i = offs[bandid_m];
+		i = vfo_p[bandid_m].offs;
 	}else{
-		i = offs[bandid_s];
+		i = vfo_p[bandid_s].offs;
 	}
 	return i;
 }
@@ -1713,7 +1821,7 @@ U16 get_offs(U8 focus){
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 // inv_duplex() if duplex = +/-, invert.  Otherwise, no change.
-//	returns dplx[] & DPLX_MASK
+//	returns vfo_p[].dplx & DPLX_MASK
 //-----------------------------------------------------------------------------
 U8 inv_duplex(U8 focus){
 	U8	i;	// temps
@@ -1724,17 +1832,17 @@ U8 inv_duplex(U8 focus){
 	}else{
 		j = bandid_s;
 	}
-	i = dplx[j] & DPLX_MASK;
+	i = vfo_p[j].dplx & DPLX_MASK;
 	if(i){
-		dplx[j] = dplx[j] ^ DPLX_MASK;
+		vfo_p[j].dplx = vfo_p[j].dplx ^ DPLX_MASK;
 	}
-	return dplx[j] & DPLX_MASK;
+	return vfo_p[j].dplx & DPLX_MASK;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 // inv_vfo() uses duplex to calculate flip of RX/TX.  Call inv_duplex() AFTER
-//	performing this Fn.  returns dplx[] & DPLX_MASK
+//	performing this Fn.  returns vfo_p[].dplx & DPLX_MASK
 //-----------------------------------------------------------------------------
 U8 inv_vfo(U8 focus){
 	U8	i;	// temp
@@ -1744,13 +1852,13 @@ U8 inv_vfo(U8 focus){
 	}else{
 		i = bandid_s;
 	}
-	if(dplx[i] & DPLX_P){
-		vfo[i] = vfo[i] + (U32)offs[i];
+	if(vfo_p[i].dplx & DPLX_P){
+		vfo_p[i].vfo = vfo_p[i].vfo + (U32)vfo_p[i].offs;
 	}
-	if(dplx[i] & DPLX_M){
-		vfo[i] = vfo[i] - (U32)offs[i];
+	if(vfo_p[i].dplx & DPLX_M){
+		vfo_p[i].vfo = vfo_p[i].vfo - (U32)vfo_p[i].offs;
 	}
-	return dplx[i] & DPLX_MASK;
+	return vfo_p[i].dplx & DPLX_MASK;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1793,8 +1901,6 @@ void write_mem(U8 focus, U8 memnum){
 // read_mem() reads the vfo state from the nv memory space
 //-----------------------------------------------------------------------------
 void read_mem(U8 focus, U8 memnum){
-	// mem structure follows this format:
-	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
 	U8	band;
 
 	if(focus == MAIN) band = bandid_m;
@@ -1816,12 +1922,12 @@ void write_nvmem(U8 band, U8 memnum){
 
 	addr = mem_band[band] + (memnum * MEM_LEN);
 	j = CS_WRITE;
-	rw32_nvr(addr, vfo[band], j|CS_OPEN);
-	rw16_nvr(addr, offs[band], j);
-	rw8_nvr(addr, dplx[band], j);
-	rw8_nvr(addr, ctcss[band], j);
-	rw8_nvr(addr, sq[band], j);
-	rw8_nvr(addr, vol[band], j);
+	rw32_nvr(addr, vfo_p[band].vfo, j|CS_OPEN);
+	rw16_nvr(addr, vfo_p[band].offs, j);
+	rw8_nvr(addr, vfo_p[band].dplx, j);
+	rw8_nvr(addr, vfo_p[band].ctcss, j);
+	rw8_nvr(addr, vfo_p[band].sq, j);
+	rw8_nvr(addr, vfo_p[band].vol, j);
 	rw8_nvr(addr, ux129_xit, j);
 	rw8_nvr(addr, ux129_rit, j);
 	rw8_nvr(addr, band, j);
@@ -1847,12 +1953,12 @@ void read_nvmem(U8 band, U8 memnum){
 
 	addr = mem_band[band] + (memnum * MEM_LEN);
 	j = CS_READ;
-	vfo[band] = rw32_nvr(addr, 0, j|CS_OPEN);
-	offs[band] = rw16_nvr(addr, 0, j);
-	dplx[band] = rw8_nvr(addr, 0, j);
-	ctcss[band] = rw8_nvr(addr, 0, j);
-	sq[band] = rw8_nvr(addr, 0, j);
-	vol[band] = rw8_nvr(addr, 0, j);
+	vfo_p[band].vfo = rw32_nvr(addr, 0, j|CS_OPEN);
+	vfo_p[band].offs = rw16_nvr(addr, 0, j);
+	vfo_p[band].dplx = rw8_nvr(addr, 0, j);
+	vfo_p[band].ctcss = rw8_nvr(addr, 0, j);
+	vfo_p[band].sq = rw8_nvr(addr, 0, j);
+	vfo_p[band].vol = rw8_nvr(addr, 0, j);
 	ux129_xit = rw8_nvr(addr, 0, j);
 	ux129_rit = rw8_nvr(addr, 0, j);
 	band = rw8_nvr(addr, 0, j);
@@ -1874,21 +1980,22 @@ void copy_vfo2temp(U8 focus){
 
 	if(focus == MAIN){
 		band = bandid_m;
-		tempi = IDMMVFO_IDX;
-		ux129_xit_m = ux129_xit;
-		ux129_rit_m = ux129_rit;
+		tempi = band + ID1200;
 	}else{
 		band = bandid_s;
-		tempi = IDSMVFO_IDX;
-		ux129_xit_s = ux129_xit;
-		ux129_rit_s = ux129_rit;
+		tempi = band + ID1200;
 	}
-	vfo[tempi] = vfo[band];
-	offs[tempi] = offs[band];
-	dplx[tempi] = dplx[band];
-	ctcss[tempi] = ctcss[band];
-	sq[tempi] = sq[band];
-	vol[tempi] = vol[band];
+	ux129_xit_t = ux129_xit;
+	ux129_rit_t = ux129_rit;
+	vfo_p[tempi] = vfo_p[band];
+	save_vfo(tempi);						// save to NVRAM
+
+/*	vfo_p[tempi].vfo = vfo_p[band].vfo;
+	vfo_p[tempi].offs = vfo_p[band].offs;
+	vfo_p[tempi].dplx = vfo_p[band].dplx;
+	vfo_p[tempi].ctcss = vfo_p[band].ctcss;
+	vfo_p[tempi].sq = vfo_p[band].sq;
+	vfo_p[tempi].vol = vfo_p[band].vol;*/
 	return;
 }
 
@@ -1902,21 +2009,21 @@ void copy_temp2vfo(U8 focus){
 
 	if(focus == MAIN){
 		band = bandid_m;
-		tempi = IDMMVFO_IDX;
-		ux129_xit = ux129_xit_m;
-		ux129_rit = ux129_rit_m;
+		tempi = band + ID1200;
 	}else{
 		band = bandid_s;
-		tempi = IDSMVFO_IDX;
-		ux129_xit = ux129_xit_s;
-		ux129_rit = ux129_rit_s;
+		tempi = band + ID1200;
 	}
-	vfo[band] = vfo[tempi];
-	offs[band] = offs[tempi];
-	dplx[band] = dplx[tempi];
-	ctcss[band] = ctcss[tempi];
-	sq[band] = sq[tempi];
-	vol[band] = vol[tempi];
+	ux129_xit = ux129_xit_t;
+	ux129_rit = ux129_rit_t;
+	vfo_p[band] = vfo_p[tempi];
+
+/*	vfo_p[band].vfo = vfo_p[tempi].vfo;
+	vfo_p[band].offs = vfo_p[tempi].offs;
+	vfo_p[band].dplx = vfo_p[tempi].dplx;
+	vfo_p[band].ctcss = vfo_p[tempi].ctcss;
+	vfo_p[band].sq = vfo_p[tempi].sq;
+	vfo_p[band].vol = vfo_p[tempi].vol;*/
 	return;
 }
 
@@ -1929,6 +2036,16 @@ void set_bandid(U8 focus, U8 b_id){
 	if(focus == MAIN) bandid_m = b_id;
 	else bandid_s = b_id;
 	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_nameptr() returns pointer to name string
+//-----------------------------------------------------------------------------
+char* get_nameptr(U8 focus){
+
+	if(focus == MAIN) return memname[bandid_m];
+	else return memname[bandid_s];
 }
 
 // end radio.c

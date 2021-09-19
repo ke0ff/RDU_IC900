@@ -75,11 +75,15 @@ char mem_ordinal[] = { "0123456789ABDEFGHJKLMNPRSTUWYZ()[]" };
 U8	lcd_buf[LCD_BUFLEN];			// LCD comm message buffer
 U8	maddr;							// mhz digit mode composite digit address and mode flags register
 U8	vfo_display;					// display update signal.  This is band (MAIN/SUB) to update or'd with 0x80 to trigger
-U8	xmode;							// xmode flags track the adjust modes (vol, squ, tone, offs)
+U8	xmode[ID1200];					// xmode flags track mem/call modes
+U8	xmodeq;							// xmodeq tracks transient adjust modes (vol, squ, tone, offs)
 U8	chkmode;						// indicates check/rev mode is in effect
 U8	chksqu;							// save reg for check squelch
 U8	mute_mode;						// main/sub mute status
 U8	tsdisplay;						// ts display flag
+U8	sys_err;						// system error flags.  0x00 = no errors
+char mfbuf[8];						// ascii text (freq field) buffer, main
+char sfbuf[8];						// ... sub
 
 //-----------------------------------------------------------------------------
 // Local Fn Declarations
@@ -91,6 +95,7 @@ U32 bin32_bcdp(U32 bin32);
 void lamp_test(U8 tf);
 void update_lcd(void);
 U8 process_MS(U8 cmd);
+void process_VFODISP(U8 focus);
 U8 test_for_cancel(U8 key);
 U32 process_DIAL(U8 focus);
 U8 process_MEM(U8 cmd);
@@ -104,8 +109,9 @@ void mblink_500hz(U8 tf);
 void sblink_500hz(U8 tf);
 void mmute_action(U8* mute_flag);
 void smute_action(U8* mute_flag);
-U8 puts_lcd(char *s, U8 dp_tf, U8 focus);
+U8 puts_lcd(U8 focus, char *s, U8 dp_tf);
 void togg_tsab(U8 focus);
+U8 copy6str(char* sptr, char* dptr, U8 cidx);
 
 //-----------------------------------------------------------------------------
 // init_lcd() initializes lcd resources
@@ -187,12 +193,13 @@ void process_UI(U8 cmd){
 	if(cmd == 0xff){
 		GPIO_PORTD_DATA_R |= LOCK_SELECT;
 		wait(10);
-		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);					// force update of slide switch status
+		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);				// force update of slide switch status
 		mode = MAIN_MODE;												// init process variables
 		chkmode = 0;
 		vfo_display = 0;
 		update_lcd();
 		process_MS(cmd);												// trigger main/sub process IPL init
+		is_mic_updn(1);													// init mic u/d repeat
 	}else{
 		//**************************************
 		// process the UI for each of the different modes:
@@ -240,7 +247,7 @@ void process_UI(U8 cmd){
 		//**************************************
 		// process slide switches (DIM and LOCK)
 		if(GPIO_PORTB_DATA_R & (RAMCS_N) == LOCK_SELECT){
-			wait(5);														// guaranteed settling time !!! need better solution here
+//			wait(5);														// guaranteed settling time !!! need better solution here
 			i = GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);						// capture DIM/LOCK switch settings
 			if(i ^ sw_stat){												// if changes..
 				if(i & DIM){
@@ -317,8 +324,18 @@ void update_lcd(void){
 	stonea(adjust_toneon(SUB, 0xff));
 	msmet(0xff, 0);														// init SRF/MEM
 	ssmet(0xff, 0);														// init SRF/MEM
-	mfreq(get_freq(MAIN), 0, 0);										// Frequency display
-	sfreq(get_freq(SUB), 0, 0);
+	if((xmode[get_band_index(MAIN)] & MC_XFLAG) == MEM_XFLAG){			// main band...
+		mema(MAIN, 1);													// turn off "M"
+	}else{
+		mema(MAIN, 0);													// turn off "M"
+	}
+	if((xmode[get_band_index(SUB)] & MC_XFLAG) == MEM_XFLAG){				// sub band...
+		mema(SUB, 1);													// turn off "M"
+	}else{
+		mema(SUB, 0);													// turn off "M"
+	}
+	mfreq(get_freq(MAIN), 0);											// Frequency display
+	sfreq(get_freq(SUB), 0);
 	//**************************************
 	// update radios
 	update_radio_all();													// trigger update of radio hardware
@@ -332,21 +349,22 @@ void update_lcd(void){
 //-----------------------------------------------------------------------------
 U8 process_MS(U8 mode){
 	static	 U32	iflags;
+	U8	b;					// key beep counter
 	U8	i;					// temp
+	U8	k;					// temp
 	U32	ii;
 	volatile U32	sin_a0;
 	volatile U32	sin_a1;
 	U8	band_focus = mode;	// band focus of keys/dial
 	S32	sii;
-	char tbuf[8];			// ascii freq field buffer
 
-	char dgbuf[30];	// !!!!debug
+//	char dgbuf[30];	// !!!!debug
 
 	//**************************************
 	// process IPL init
 	if(mode == 0xff){
 		maddr = MHZ_OFF;												// MHz/thumbwheel mode init
-		xmode = 0;														// x-modes
+		xmodeq = 0;														// x-modes
 		mute_mode = 0;													// smute = off
 		iflags = 0;														// SIN change flags storage init
 		tsdisplay = 0;													// clear TS adj display mode
@@ -354,6 +372,7 @@ U8 process_MS(U8 mode){
 	}else{
 		//**************************************
 		// process SIN changes
+		k = get_band_index(band_focus);
 		iflags |= read_sin_flags(0);									// merge with radio.c variable
 		if(iflags){
 			// got changes...
@@ -363,14 +382,14 @@ U8 process_MS(U8 mode){
 			}
 			sin_a0 = fetch_sin(0);										// update data
 			// check if squelch adjust
-			if(!(xmode & SQU_XFLAG)){
+			if(!(xmodeq & SQU_XFLAG)){
 				if(iflags & SIN_MSRF_F){
 					// update SRF
 					ii = sin_a0 >> 23;									// isolate main and sub SRF
 					i = (U8)(ii & 0x0f);
 					msmet(i>>1, 0);										// update glass
 					read_sin_flags(SIN_MSRF_F);							// clear changes flag
-					if(xmode & CALLM_XFLAG){
+					if(xmode[get_band_index(MAIN)] & CALL_XFLAG){
 						mmem(get_callnum(MAIN, 0));						// update call#
 					}else{
 						mmem(get_memnum(MAIN, 0));						// update mem#
@@ -378,14 +397,14 @@ U8 process_MS(U8 mode){
 				}
 			}
 			// check if vol adjust
-			if(!(xmode & VOL_XFLAG)){
+			if(!(xmodeq & VOL_XFLAG)){
 				if(iflags & SIN_SSRF_F){
 					// update SRF
 					ii = sin_a0 >> 19;									// isolate main and sub SRF
 					i = (U8)(ii & 0x0f);
 					ssmet(i>>1, 0);										// update glass
 					read_sin_flags(SIN_SSRF_F);							// clear changes flag
-					if(xmode & CALLS_XFLAG){
+					if(xmode[get_band_index(SUB)] & CALL_XFLAG){
 						smem(get_callnum(SUB, 0));						// update call#
 					}else{
 						smem(get_memnum(SUB, 0));						// update mem#
@@ -394,13 +413,13 @@ U8 process_MS(U8 mode){
 			}
 			if(iflags & SIN_SQS_F){										// LED updates (MRX, MTX, SRX)
 				// update RX LEDs
-				if(sin_a0 & SIN_SQSA){
+				if((sin_a0 & SIN_SQSA) && !(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT))){
 					// main led
 					GPIO_PORTC_DATA_R |= MRX_N;
 				}else{
 					GPIO_PORTC_DATA_R &= ~MRX_N;
 				}
-				if(sin_a0 & SIN_SQSB){
+				if(sin_a0 & SIN_SQSB && !(sys_err & (NO_B_PRSNT|NO_SUX_PRSNT))){
 					// sub led
 					GPIO_PORTC_DATA_R |= SRX_N;
 				}else{
@@ -422,73 +441,10 @@ U8 process_MS(U8 mode){
 		}
 		//**************************************
 		// process vfo display update signal
-		if(vfo_display){
-			if(xmode & (TONE_XFLAG|OFFS_XFLAG)){
-				if(xmode & TONE_XFLAG){
-					// TONE adjust mode
-					if(vfo_display & VMODE_TDISP){						// if triggered
-						i = adjust_tone(band_focus, 0) & CTCSS_MASK;
-						if((i > TONE_MAX) || (i == 0)){
-							i = 1;										// error trap
-						}
-						ii = tone_list[i - 1];							// tone list is "0" origin, tones values are "1" origin
-						sprintf(tbuf,"%4d  ", ii);						// convert number to display string
-						puts_lcd(tbuf, 1, band_focus);
-						vfo_display &= ~VMODE_TDISP;					// clear update trigger
-						force_push();									// force update to NVRAM
-					}
-				}else{
-					// offset adjust mode
-
-				}
-			}else{
-				if(tsdisplay){
-					switch(tsdisplay){
-					case 1:
-						puts_lcd("A 5B10", 1, band_focus);
-						break;
-
-					case 2:
-						puts_lcd("A 5B25", 1, band_focus);
-						break;
-
-					case 3:
-						puts_lcd("A10B25", 1, band_focus);
-						break;
-
-					default:
-						puts_lcd("A--B--", 1, band_focus);
-						break;
-					}
-					vfo_display &= ~(VMODE_TSDISP);
-				}else{
-					// normal VFO display
-					sprintf(dgbuf,"vfodisp: %02x",vfo_display); //!!!
-					putsQ(dgbuf);
-					if(vfo_display & MAIN){
-						if(vfo_display & VMODE_ISTX){
-							mfreq(get_freq(MAIN | VMODE_ISTX), 0, 0);	// update main freq display from vfotr
-							sprintf(dgbuf,"vfofrqT: %d",get_freq(band_focus | 0x80)); //!!!
-							putsQ(dgbuf);
-						}else{
-							mfreq(get_freq(MAIN), 0, 0);				// update main freq display
-							sprintf(dgbuf,"vfofrqR: %d",get_freq(band_focus)); //!!!
-							putsQ(dgbuf);
-						}
-						vfo_display &= ~(VMODE_ISTX | MAIN);
-					}else{
-						if(vfo_display & SUB_D){
-							sfreq(get_freq(SUB), 0, 0);					// update sub freq display
-							vfo_display &= ~(SUB_D);
-						}
-					}
-				}
-			}
-//			vfo_display = 0;
-		}
+		process_VFODISP(band_focus);
 		//**************************************
-		// process dial
-		iflags |= process_DIAL(band_focus);								// process dial and mic up/dn changes
+		// process dial and mic up/dn changes
+		iflags |= process_DIAL(band_focus);
 		//**************************************
 		// process timeouts (MHz, xflag and SUB)
 		if(!mhz_time(0) && (maddr < MHZ_OFF)){							// process mhz digit timeout:
@@ -499,24 +455,24 @@ U8 process_MS(U8 mode){
 			copy_vfot(band_focus);
 			vfo_change(band_focus);
 		}
-		if((xmode & VOL_XFLAG) && (!v_time(0))){						// if vol x-mode timeout:
-			xmode &= ~VOL_XFLAG;
+		if((xmodeq & VOL_XFLAG) && (!v_time(0))){						// if vol x-mode timeout:
+			xmodeq &= ~VOL_XFLAG;
 			iflags |= SIN_SSRF_F;										// update sub SRFs
 			ssmet(0xff, 0);												// update glass
 		}
-		if((xmode & SQU_XFLAG) && (!q_time(0))){						// if squ x-mode timeout:
-			xmode &= ~SQU_XFLAG;
+		if((xmodeq & SQU_XFLAG) && (!q_time(0))){						// if squ x-mode timeout:
+			xmodeq &= ~SQU_XFLAG;
 			iflags |= SIN_MSRF_F;										// update main SRFs
 			msmet(0xff, 0);												// update glass
 		}
-		if((xmode & OFFS_XFLAG) && (!offs_time(0))){					// if offs x-mode timeout:
+		if((xmodeq & OFFS_XFLAG) && (!offs_time(0))){					// if offs x-mode timeout:
 			do_2beep();													// timeoute alert beep (Morse "I")
 			if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0);
 			else digblink(maddr,0);
 			mhz_time(0xff);												// clear timers
 			offs_time(0xff);
 			maddr = MHZ_OFF;
-			xmode &= ~OFFS_XFLAG;
+			xmodeq &= ~OFFS_XFLAG;
 			if(band_focus == MAIN) vfo_display |= MAIN;					// update main VFO
 			else vfo_display |= SUB_D;									// update sub VFO
 			force_push();												// force update to NVRAM
@@ -533,6 +489,7 @@ U8 process_MS(U8 mode){
 				}else{
 					alow(0);
 				}
+				k = get_band_index(band_focus);							// reset focus pointer
 			}
 		}
 		if(tsdisplay){
@@ -545,12 +502,14 @@ U8 process_MS(U8 mode){
 		}
 		//**************************************
 		// process keys
+		b = 0;
 		if(got_key()){													// only run through this branch if there are keys to input
 			if(band_focus == SUB){
 				sub_time(1);											// reset timeout
 			}
 			i = get_key();												// pull key in from buffer space
 			i = test_for_cancel(i);										// check to see if keycode qualifies for "cancel" (substitutes "cancel" key in place of the actual key)
+			b = 1;
 			switch(i){													// dispatch to key-specific code segments...
 			case DUPchr:												// duplex button, initial press
 				if(band_focus == MAIN_MODE){
@@ -604,22 +563,28 @@ U8 process_MS(U8 mode){
 				break;
 
 			case SUBchr:												// SUB button, initial press
-				if(band_focus == MAIN_MODE){
-					band_focus = SUB_MODE;
-					asub(1);
-					ats(read_dplx(SUB) & TSA_F);						// TS flag updates based on focus
-					sub_time(1);										// set sub timer
+				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+					if(band_focus == MAIN_MODE){
+						band_focus = SUB_MODE;
+						asub(1);
+						ats(read_dplx(SUB) & TSA_F);					// TS flag updates based on focus
+						sub_time(1);									// set sub timer
+					}else{
+						band_focus = MAIN_MODE;
+						asub(0);
+						ats(read_dplx(MAIN) & TSA_F);
+						sub_time(0xff);									// clear sub timer
+					}
+					k = get_band_index(band_focus);						// reset focus pointer
+					i = get_lohi(band_focus, 0xff);
+					update_lcd();
+/*					if(i){												// HILO updates based on focus
+						alow(1);
+					}else{
+						alow(0);
+					}*/
 				}else{
-					band_focus = MAIN_MODE;
-					asub(0);
-					ats(read_dplx(MAIN) & TSA_F);
-					sub_time(0xff);										// clear sub timer
-				}
-				i = get_lohi(band_focus, 0xff);
-				if(i){													// HILO updates based on focus
-					alow(1);
-				}else{
-					alow(0);
+					b = 0;	// no beep
 				}
 				break;
 
@@ -673,7 +638,7 @@ U8 process_MS(U8 mode){
 					temp_vfo(band_focus);								// copy vfo -> vfot
 				}else{													// already in thumbwheel mode (this will cancel the thumbwheel mode)
 //					i = set_mhz_addr(0xff);
-					if(xmode & OFFS_XFLAG){								// offset is differentiated from VFO frequency
+					if(xmodeq & OFFS_XFLAG){							// offset is differentiated from VFO frequency
 						if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0); // blkin digit off
 						else digblink(maddr&(~MHZ_OFFS),0);
 						mhz_time(0xff);									// clear timers
@@ -690,11 +655,12 @@ U8 process_MS(U8 mode){
 					}
 					force_push();										// force update to NVRAM
 				}
+				b = 2;	// 2beeps
 				break;
 
 			case Vupchr:												// volume increase, initial press... VOL/SQU commandeer the SRF meters and mem ch digit to display level graphics
 				v_time(1);
-				xmode |= VOL_XFLAG;
+				xmodeq |= VOL_XFLAG;
 				adjust_vol(band_focus, 1);
 				ssmet(0x80 | adjust_vol(band_focus, 0), 0);				// signal a volume update
 				force_push();											// force update to NVRAM
@@ -703,9 +669,10 @@ U8 process_MS(U8 mode){
 			case Vdnchr_H:												// VOL-, hold mutes the audio
 				adjust_vol(band_focus, 0x81);							// set vol = 1 (then to 0 below...)
 			case Vupchr_H:												// VOL+ hold displays the current level without change
+				b = 2;	// 2beeps
 			case Vdnchr:												// VOL-, initial press decreases the VOL level 1 step
 				v_time(1);
-				xmode |= VOL_XFLAG;
+				xmodeq |= VOL_XFLAG;
 				adjust_vol(band_focus, -1);
 				ssmet(0x80 | adjust_vol(band_focus, 0), 0);
 				force_push();											// force update to NVRAM
@@ -714,9 +681,10 @@ U8 process_MS(U8 mode){
 			case Qupchr_H:												// SQU+, hold sets max squelch
 				adjust_squ(band_focus, 0x80 | (LEVEL_MAX - 1));			// set squ = max-1 (then to max below...)
 			case Qdnchr_H:												// SQU- hold displays the current level without change
+				b = 2;	// 2beeps
 			case Qupchr:												// SQU+, initial press increases the SQU level 1 step
 				q_time(1);
-				xmode |= SQU_XFLAG;
+				xmodeq |= SQU_XFLAG;
 				adjust_squ(band_focus, 1);
 				msmet(0x80 | adjust_squ(band_focus, 0), 0);
 				force_push();											// force update to NVRAM
@@ -724,7 +692,7 @@ U8 process_MS(U8 mode){
 
 			case Qdnchr:												// SQU-, initial press decreases the SQU level 1 step
 				q_time(1);
-				xmode |= SQU_XFLAG;
+				xmodeq |= SQU_XFLAG;
 				adjust_squ(band_focus, -1);
 				msmet(0x80 | adjust_squ(band_focus, 0), 0);
 				force_push();											// force update to NVRAM
@@ -734,6 +702,7 @@ U8 process_MS(U8 mode){
 				mmute_action(&mute_mode);
 				if(!(mute_mode & SUB_MUTE)){
 					smute_action(&mute_mode);
+					b = 2;	// 2beeps
 				}
 				break;
 
@@ -745,13 +714,13 @@ U8 process_MS(U8 mode){
 				break;
 
 			case TONEchr:												// TONE, initial: toggle tone on/off or cancel adj mode (uses xmode to display tone freq in VFO space)
-				if(xmode & TONE_XFLAG){									// tone mode already on, cancel it
+				if(xmodeq & TONE_XFLAG){									// tone mode already on, cancel it
 					if(band_focus == MAIN){
 						vfo_display |= MAIN;							// update main VFO
 					}else{
 						vfo_display |= SUB_D;							// update sub VFO
 					}
-					xmode &= ~TONE_XFLAG;
+					xmodeq &= ~TONE_XFLAG;
 				}else{
 					i = adjust_toneon(band_focus, 0xff);				// tone mode off, turn it on...
 					if(i) i = 0;
@@ -768,7 +737,7 @@ U8 process_MS(U8 mode){
 
 			case TONEchr_H:												// TONE hold, adjust tone
 				vfo_display |= VMODE_TDISP;								// force tone freq to display
-				xmode |= TONE_XFLAG;									// enable tone xmode
+				xmodeq |= TONE_XFLAG;									// enable tone xmode
 				i = adjust_toneon(band_focus, 0xff);					// undo tone toggle that got us here...
 				if(i) i = 0;
 				else i = 1;
@@ -779,6 +748,7 @@ U8 process_MS(U8 mode){
 					stonea(i);
 				}
 				force_push();											// force update to NVRAM
+				b = 2;	// 2beeps
 				break;
 
 			case TSchr_H:												// TS hold, set-mode for TS_A/B (this is preliminary, uses beeps as feedback)
@@ -798,6 +768,7 @@ U8 process_MS(U8 mode){
 				ts_time(1);												// set timeout
 				vfo_display |= VMODE_TSDISP;							// set display
 				togg_tsab(band_focus);									// undo the toogle from initial press
+				b = 2;	// 2beeps
 				break;
 
 			case TSchr:													// TS, initial press: freq step mode toggle
@@ -813,11 +784,11 @@ U8 process_MS(U8 mode){
 				if(band_focus == MAIN_MODE){
 					inc_dplx(MAIN);
 					inc_dplx(MAIN);
-					mfreq((U32)get_offs(band_focus), LEAD0_BLINK, 0);
+					mfreq((U32)get_offs(band_focus), LEAD0_BLINK);
 				}else{
 					inc_dplx(SUB);
 					inc_dplx(SUB);
-					sfreq((U32)get_offs(band_focus), LEAD0_BLINK, 0);
+					sfreq((U32)get_offs(band_focus), LEAD0_BLINK);
 				}
 				mhz_time(1);
 				offs_time(1);
@@ -829,24 +800,33 @@ U8 process_MS(U8 mode){
 				}
 				if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),1);
 				else digblink(maddr&(~MHZ_OFFS),1);
-				xmode |= OFFS_XFLAG;
+				xmodeq |= OFFS_XFLAG;
 //				update_lcd();
+				b = 2;	// 2beeps
 				break;
 
 			case VFOchr:												// VFO, initial press: cycles selected band modules (this is the BAND button on the IC-901)
-				set_next_band(band_focus);
-				update_lcd();
-				force_push();											// force update to NVRAM
+				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+					set_next_band(band_focus);
+					update_lcd();
+					force_push();										// force update to NVRAM
+				}else{
+					b = 0;	// no beep
+				}
 				break;
 
 			case MSchr:
-//				mute_radio(0);											// mute radio during band-swap
-				set_swap_band();
-				if(mute_mode & SUB_MUTE){
-					adjust_vol(MAIN, 0);								// restore main vol
+				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+//					mute_radio(0);										// mute radio during band-swap
+					set_swap_band();
+					if(mute_mode & SUB_MUTE){
+						adjust_vol(MAIN, 0);							// restore main vol
+					}
+					update_lcd();
+					force_push();										// force update to NVRAM
+				}else{
+					b = 0;	// no beep
 				}
-				update_lcd();
-				force_push();											// force update to NVRAM
 				break;
 
 			case CHKchr:												// CHECK, initial press: this is the reverse mode (no squ change)
@@ -872,6 +852,7 @@ U8 process_MS(U8 mode){
 					// !!! open squelch
 					chksqu = adjust_squ(band_focus, 0);
 					adjust_squ(band_focus, 0x80);						// open up squ (set to zero)
+					b = 2;	// 2beeps
 				}
 				break;
 
@@ -892,132 +873,212 @@ U8 process_MS(U8 mode){
 						else sset_500hz(0);
 					}
 				}
+				b = 0;	// no beeps
 				break;
 
-			case MRchr:															// Mem-mode toggle: this toggles between mem and vfo mode
+			case MRchr:													// Mem-mode toggle: this toggles between mem and vfo mode
 				// if mem mode, turn off
-				if(band_focus == MAIN){
-					if(xmode & CALLM_XFLAG) xmode &= ~(CALLM_XFLAG|MEMM_XFLAG);	// turn off call, force M on
-					if(xmode & MEMM_XFLAG){
-						mmema(0);												// turn off "M"
-						xmode &= ~MEMM_XFLAG;
-						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){
-							copy_temp2vfo(band_focus);
-						}
-					}else{
-						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){			// copy vfo to temp
-							copy_vfo2temp(band_focus);
-						}
-						mmema(1);												// turn on "M"
-						xmode |= MEMM_XFLAG;
-						read_mem(band_focus, get_memnum(band_focus, 0));
+				if(xmode[k] & CALL_XFLAG) xmode[k] &= ~(MC_XFLAG);		// turn off call, force M on
+				if(xmode[k] & MEM_XFLAG){
+					mema(band_focus, 0);								// turn off "M"
+					xmode[k] &= ~MEM_XFLAG;
+					if((xmode[k] & (MC_XFLAG)) == 0){
+						copy_temp2vfo(band_focus);
 					}
 				}else{
-					if(xmode & CALLS_XFLAG) xmode &= ~(CALLS_XFLAG|MEMS_XFLAG);	// turn off call, force M on
-					if(xmode & MEMS_XFLAG){
-						smema(0);												// turn off "M"
-						xmode &= ~MEMS_XFLAG;
-						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){
-							copy_temp2vfo(band_focus);
-							update_lcd();
-						}
-					}else{
-						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){			// copy vfo to temp
-							copy_vfo2temp(band_focus);
-						}
-						smema(1);												// turn on "M"
-						xmode |= MEMS_XFLAG;
-						read_mem(band_focus, get_memnum(band_focus, 0));
+					if((xmode[k] & (MC_XFLAG)) == 0){					// copy vfo to temp
+						copy_vfo2temp(band_focus);
 					}
+					mema(band_focus, 1);								// turn on "M"
+					xmode[k] |= MEM_XFLAG;
+						read_mem(band_focus, get_memnum(band_focus, 0));
 				}
+				write_xmode(band_focus);
 				update_lcd();
 				break;
 
-			case CALLchr:														// call-mode toggle: this toggles between call mode
-				// if mem mode, turn off
-				if(band_focus == MAIN){
-					if(xmode & CALLM_XFLAG){
-						xmode &= ~CALLM_XFLAG;
-						if(xmode & MEMM_XFLAG){
-							mmema(1);											// turn on "M"
-						}
-						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){
-							copy_temp2vfo(band_focus);
-						}
-					}else{
-						mmema(0);												// turn off "M"
-						if((xmode & (CALLM_XFLAG|MEMM_XFLAG)) == 0){			// copy vfo to temp
-							copy_vfo2temp(band_focus);
-						}
-						xmode |= CALLM_XFLAG;
-						read_mem(band_focus, get_callnum(band_focus, 0));
+			case CALLchr:												// call-mode toggle: this toggles between call mode
+				if(xmode[k] & CALL_XFLAG){
+					// call mode going off...
+					xmode[k] &= ~CALL_XFLAG;							// turn off call mode
+					if(xmode[k] & MEM_XFLAG){							// if mem active, go to mem mode..
+						mema(band_focus, 1);							// turn on "M" indicator
+						read_mem(band_focus, get_memnum(band_focus, 0));
 					}
-					iflags |= SIN_MSRF_F;										// force update of MSRF
+					if((xmode[k] & (MC_XFLAG)) == 0){
+						copy_temp2vfo(band_focus);						// if no mem mode, recall VFO
+					}
 				}else{
-					if(xmode & CALLS_XFLAG){
-						xmode &= ~CALLS_XFLAG;
-						if(xmode & MEMS_XFLAG){
-							smema(1);											// turn on "M"
-						}
-						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){
-							copy_temp2vfo(band_focus);
-						}
-					}else{
-						smema(0);												// turn off "M"
-						if((xmode & (CALLS_XFLAG|MEMS_XFLAG)) == 0){			// copy vfo to temp
-							copy_vfo2temp(band_focus);
-						}
-						xmode |= CALLS_XFLAG;
-						read_mem(band_focus, get_callnum(band_focus, 0));
+					// call mode coming on...
+					mema(band_focus, 0);								// turn off "M" indicator
+					if((xmode[k] & (MC_XFLAG)) == 0){					// copy vfo state to temp only if not done already
+						copy_vfo2temp(band_focus);
 					}
-					iflags |= SIN_SSRF_F;										// force update of SSRF
+					xmode[k] |= CALL_XFLAG;								// turn on call mode
+					read_mem(band_focus, get_callnum(band_focus, 0));	// recall VFO state
 				}
-				update_lcd();
+				if(band_focus == MAIN){
+					iflags |= SIN_MSRF_F;								// force update of MSRF
+				}else{
+					iflags |= SIN_SSRF_F;								// force update of SSRF
+				}
+				write_xmode(band_focus);
+				update_lcd();											// update display & radio
 				break;
 
-			case CALLchr_H:														// call-mode hold: write VFO to call mem
-				if(band_focus == MAIN){
-					if(xmode & CALLM_XFLAG){
-						copy_temp2vfo(band_focus);
-						write_mem(band_focus, get_callnum(band_focus, 0));
-						iflags |= SIN_MSRF_F;									// force update of MSRF
-						update_lcd();
+			case CALLchr_H:												// call-mode hold: write VFO to call mem
+				if(xmode[k] & CALL_XFLAG){
+					copy_temp2vfo(band_focus);
+					write_mem(band_focus, get_callnum(band_focus, 0));
+					if(band_focus == MAIN){
+						iflags |= SIN_MSRF_F;							// force update of MSRF
+					}else{
+						iflags |= SIN_SSRF_F;							// force update of SSRF
 					}
-				}else{
-					if(xmode & CALLS_XFLAG){
-						copy_temp2vfo(band_focus);
-						write_mem(band_focus, get_callnum(band_focus, 0));
-						iflags |= SIN_SSRF_F;									// force update of MSRF
-						update_lcd();
-					}
+					update_lcd();
+					b = 2;	// 2beeps
 				}
 				break;
 
-			case MWchr_H:														// Mem-write: write VFO to mem in VFO mode; if mem mode, exits with mem in VFO (copy mem to VFO)
-				if(band_focus == MAIN){
-					if(xmode & (CALLM_XFLAG|MEMM_XFLAG)){;
-						xmode &= ~(CALLM_XFLAG|MEMM_XFLAG);						// turn off call/mem, no VFO coppy-back
-						mmema(0);												// turn off "M"
-						iflags |= SIN_MSRF_F;									// force update of MSRF
-						update_lcd();
+			case MWchr_H:												// Mem-write: write VFO to mem in VFO mode; if mem mode, exits with mem in VFO (copy mem to VFO)
+				if(xmode[k] & (MC_XFLAG)){;
+					xmode[k] &= ~(MC_XFLAG);							// turn off call/mem, no VFO coppy-back
+					mema(band_focus, 0);								// turn off "M"
+					if(band_focus == MAIN){
+						iflags |= SIN_MSRF_F;							// force update of MSRF
 					}else{
-						write_mem(band_focus, get_memnum(band_focus, 0));
+						iflags |= SIN_SSRF_F;							// force update of SSRF
 					}
+					update_lcd();
 				}else{
-					if(xmode & (CALLS_XFLAG|MEMS_XFLAG)){;
-						xmode &= ~(CALLS_XFLAG|MEMS_XFLAG);						// turn off call/mem, no VFO coppy-back
-						smema(0);												// turn off "M"
-						iflags |= SIN_SSRF_F;									// force update of MSRF
-						update_lcd();
-					}else{
-						write_mem(band_focus, get_memnum(band_focus, 0));
-					}
+					write_mem(band_focus, get_memnum(band_focus, 0));
 				}
+				b = 2;	// 2beeps
+				break;
+
+			default:
+				b = 0;	// no beeps
+				break;
+			}
+			// process beeps
+			switch(b){
+			case 1:
+				do_1beep();
+				break;
+
+			case 2:
+				do_2beep();
+				break;
+
+			default:
+				break;
 			}
 		}
 	}
 	return band_focus;
 }	// end process_MS()
+
+
+//-----------------------------------------------------------------------------
+// process_VFODISP() process freq display options
+//-----------------------------------------------------------------------------
+void process_VFODISP(U8 focus){
+	U8	i;			// temps
+	U8	j = 0;
+	U16	ii;
+	char tbuf[8];	// ascii freq field buffer
+
+	if(vfo_display){
+		// calculate display mode for switch() frame:				// This makes it easier to maintain the VFO display modes (now and future)
+		if(xmodeq & (TONE_XFLAG|OFFS_XFLAG)) j = TONE_DISP;
+		else if(tsdisplay) j = TS_DISP;
+		     else if(xmodeq & (TEXTM_SLIDE|TEXTS_SLIDE)) j = TXTSLID_DISP;
+			      else j = NORM_DISP;
+		// dispatch switch() - each "case" is a display mode
+		switch(j){
+		case TONE_DISP:
+			if(xmodeq & TONE_XFLAG){
+				// TONE adjust mode
+				if(vfo_display & VMODE_TDISP){						// if triggered
+					i = adjust_tone(focus, 0) & CTCSS_MASK;
+					if((i > TONE_MAX) || (i == 0)){
+						i = 1;										// error trap
+					}
+					ii = tone_list[i - 1];							// tone list is "0" origin, tones values are "1" origin
+					sprintf(tbuf,"%4d  ", ii);						// convert number to display string
+					puts_lcd(focus, tbuf, 1);
+					vfo_display &= ~VMODE_TDISP;					// clear update trigger
+					force_push();									// force update to NVRAM
+				}
+//			}else{
+				// offset adjust mode
+
+			}
+			break;
+
+		case TS_DISP:
+			switch(tsdisplay){
+			case 1:
+				puts_lcd(focus, "A 5B10", 1);
+				break;
+
+			case 2:
+				puts_lcd(focus, "A 5B25", 1);
+				break;
+
+			case 3:
+				puts_lcd(focus, "A10B25", 1);
+				break;
+
+			default:
+				puts_lcd(focus, "A--B--", 1);
+				break;
+			}
+			vfo_display &= ~(VMODE_TSDISP);
+			break;
+
+		case NORM_DISP:
+			// normal VFO display
+//				sprintf(dgbuf,"vfodisp: %02x",vfo_display); //!!!
+//				putsQ(dgbuf);
+			if(vfo_display & MAIN){
+				if(vfo_display & VMODE_ISTX){
+					mfreq(get_freq(MAIN | VMODE_ISTX), 0);		// update main freq display from vfotr
+//						sprintf(dgbuf,"vfofrqT: %d",get_freq(focus | 0x80)); //!!!
+//						putsQ(dgbuf);
+				}else{
+					mfreq(get_freq(MAIN), 0);					// update main freq display
+//						sprintf(dgbuf,"vfofrqR: %d",get_freq(focus)); //!!!
+//						putsQ(dgbuf);
+				}
+				vfo_display &= ~(VMODE_ISTX | MAIN);
+			}else{
+				if(vfo_display & SUB_D){
+					sfreq(get_freq(SUB), 0);					// update sub freq display
+					vfo_display &= ~(SUB_D);
+				}
+			}
+			break;
+
+		case TXTSLID_DISP:
+			// text slider display mode
+			if(!slide_time(0)){
+				if(xmodeq & TEXTM_SLIDE){
+					i = puts_slide(MAIN, get_nameptr(MAIN), 0);
+				}
+				if(xmodeq & TEXTS_SLIDE){
+					i = puts_slide(SUB, get_nameptr(SUB), 0);
+				}
+				slide_time(1);
+			}
+			break;
+
+		default:
+			break;
+		}
+	}
+	return;
+}
 
 //-----------------------------------------------------------------------------
 // test_for_cancel() looks for cancel keys based on mode registers
@@ -1075,7 +1136,7 @@ U8 test_for_cancel(U8 key){
 				break;
 			}
 		}else{
-			if(xmode & TONE_XFLAG){
+			if(xmodeq & TONE_XFLAG){
 				switch(key){								// process TONE adjust key-cancel
 				case Vupchr:								// don't cancel on these codes:
 				case Vdnchr:								// VOLu/d, SQUu/d, TONE
@@ -1099,7 +1160,7 @@ U8 test_for_cancel(U8 key){
 					break;
 				}
 			}else{
-				if(xmode & (VOL_XFLAG|SQU_XFLAG)){
+				if(xmodeq & (VOL_XFLAG|SQU_XFLAG)){
 					switch(key){							// process V/Q adjust key-cancel
 					case SUBchr:
 					case MSchr:
@@ -1217,17 +1278,19 @@ void smute_action(U8* mute_flag){
 U32 process_DIAL(U8 focus){
 	U8	i;					// temp
 	U8	j;
-	U8	k;
+	U8	k;					// band index
+	U8	m;
 	U32	rflags = 0;			// return flags
 
+	k = get_band_index(focus);
 	// process dial
-	j = is_mic_updn() + get_dial(1);
+	j = is_mic_updn(0) + get_dial(1);
 	if(j){
 		if(focus == SUB){
 			sub_time(1);								// reset timeout
 		}
 	}
-	if(xmode & TONE_XFLAG){
+	if(xmodeq & TONE_XFLAG){
 		if(j){
 			adjust_tone(focus, j);
 			vfo_display |= VMODE_TDISP;
@@ -1254,45 +1317,46 @@ U32 process_DIAL(U8 focus){
 		}else{
 			if(j){
 				// if focus and mem mode == active:
-				if(((xmode & (MEMM_XFLAG|CALLM_XFLAG)) && (focus == MAIN)) | ((xmode & (MEMS_XFLAG|CALLS_XFLAG)) && (focus == SUB))){
-					// inc/dec memory#
+				if(xmode[k] & (MC_XFLAG)){
+					// inc/dec mem/call#
 					if(focus == MAIN){
-						if(xmode & CALLM_XFLAG){
+						if(xmode[k] & CALL_XFLAG){
 							get_callnum(focus, j);
 						}else{
 							get_memnum(focus, j);
 						}
 						rflags = SIN_MSRF_F;					// force update of MSRF
 					}else{
-						if(xmode & CALLS_XFLAG){
+						if(xmode[k] & CALL_XFLAG){
 							get_callnum(focus, j);
 						}else{
 							get_memnum(focus, j);
 						}
 						rflags = SIN_SSRF_F;					// force update of MSRF
 					}
-					if(xmode & CALLM_XFLAG){
+					if(xmode[k] & CALL_XFLAG){
 						read_mem(focus, get_callnum(focus, 0));	// read new call
 					}else{
 						read_mem(focus, get_memnum(focus, 0));	// read new mem
 					}
 					rflags |= SIN_SSRF_F;						// force update of SSRF
+					save_mc(focus);								// save changes to NVRAM
 					update_lcd();
 				}else{
 					if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
 						// No thumbwheel mode:
 						i = add_vfo(focus, j, maddr);			// update vfo
 						if(i && (focus == MAIN)){
-							mfreq(get_freq(MAIN), 0, 0);		// update display
+							mfreq(get_freq(MAIN), 0);			// update display
 						}
 						if(i && (focus == SUB)){
-							sfreq(get_freq(SUB), 0, 0);
+							sfreq(get_freq(SUB), 0);
 						}
 						vfo_change(focus);
 					}else{
 						// digit-by-digit (thumbwheel) mode
-						k = maddr & (~MHZ_OFFS);				// mask offset mode flag
-						if(k == 0) j = (j & 0x01) * 5;			// pick the odd 5KHz
+						m = maddr & (~MHZ_OFFS);				// mask offset mode flag
+						if(m == 0) j = (j & 0x01) * 5;			// pick the odd 5KHz
 						i = add_vfo(focus, j, maddr);			// update vfo
 						if(mhz_time(0)){
 							mhz_time(1);						// reset timer
@@ -1305,10 +1369,10 @@ U32 process_DIAL(U8 focus){
 							offs_time(0xff);
 						}
 						if(i && (focus == MAIN)){
-							mfreq(get_vfot(), LEAD0_BLINK, 0);	// update main display
+							mfreq(get_vfot(), LEAD0_BLINK);		// update main display
 						}
 						if(i && (focus == SUB)){
-							sfreq(get_vfot(), LEAD0_BLINK, 0);	// update sub display
+							sfreq(get_vfot(), LEAD0_BLINK);		// update sub display
 						}
 						vfo_change(focus);
 					}
@@ -1362,20 +1426,21 @@ void digblink(U8 digaddr, U8 tf){
 // mfreq() sets the main frequency.  binfreq = binary KHz
 //	set blink to display leading zeros
 //-----------------------------------------------------------------------------
-void mfreq(U32 binfreq, U8 blink, U8 off_err){
+void mfreq(U32 binfreq, U8 blink){
 	U8	i;
 	U8	k = 0;
 	U32	ii;
 	U32	jj;
 
-	if(off_err){										// trap "off" and "off-line" error states
-		if(off_err == NO_UX_PRSNT){
-			// disp "OFF"
-			mputs_lcd("-OFF-", 0);
-		}
-		if(off_err == NO_B_PRSNT){
+	if(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT)){			// trap "off" and "off-line" error states
+		if(sys_err & NO_B_PRSNT){
 			// disp "----" (off-line)
-			mputs_lcd("------", 0);
+			mputs_lcd("NOBASE", 0);
+		}else{
+			if(sys_err & NO_MUX_PRSNT){
+				// disp "OFF"
+				mputs_lcd("-OFF-", 0);
+			}
 		}
 	}else{
 		ii = bin32_bcdp(binfreq);						// convert binary to BCD
@@ -1410,23 +1475,24 @@ void mfreq(U32 binfreq, U8 blink, U8 off_err){
 }	// end mfreq()
 
 //-----------------------------------------------------------------------------
-// mfreq() sets the sub frequency.  binfreq = binary KHz
+// sfreq() sets the sub frequency.  binfreq = binary KHz
 //	set blink to display leading zeros
 //-----------------------------------------------------------------------------
-void sfreq(U32 binfreq, U8 blink, U8 off_err){
+void sfreq(U32 binfreq, U8 blink){
 	U8	i;
 	U8	k = 0;
 	U32	ii;
 	U32	jj;
 
-	if(off_err){										// trap "off" and "off-line" error states
-		if(off_err == NO_UX_PRSNT){
-			// disp "OFF"
-			sputs_lcd("-OFF-", 0);
-		}
-		if(off_err == NO_B_PRSNT){
+	if(sys_err & (NO_B_PRSNT|NO_SUX_PRSNT)){										// trap "off" and "off-line" error states
+		if(sys_err & NO_B_PRSNT){
 			// disp "----" (off-line)
 			sputs_lcd("------", 0);
+		}else{
+			if(sys_err & NO_SUX_PRSNT){
+				// disp "OFF"
+				sputs_lcd("-OFF-", 0);
+			}
 		}
 	}else{
 		// supress leading zeros
@@ -1507,8 +1573,12 @@ void msmet(U8 srf, U8 blink){
 		lcd_buf[9] = LOAD_PTR | MSRF012_ADDR;
 		lcd_buf[10] = WR_BMEM;							// no flash
 		put_spi(lcd_buf, CS_OPENCLOSE);					// send DU message
+		if(xmode[get_band_index(MAIN)] & CALL_XFLAG){
+			mmem(get_callnum(MAIN, 0));					// restore call#
+		}else{
+			mmem(get_memnum(MAIN, 0));					// restore mem#
+		}
 		srf = 0;
-		mmem(get_memnum(MAIN, 0));						// restore mem#
 	}
 	if(srf & 0x80){										// do q/v level
 		srf &= 0x7f;
@@ -1590,8 +1660,12 @@ void ssmet(U8 srf, U8 blink){
 		lcd_buf[9] = LOAD_PTR | SSRF012_ADDR;
 		lcd_buf[10] = WR_BMEM;							// no flash
 		put_spi(lcd_buf, CS_OPENCLOSE);					// send DU message
+		if(xmode[get_band_index(SUB)] & CALL_XFLAG){
+			smem(get_callnum(SUB, 0));					// restore call#
+		}else{
+			smem(get_memnum(SUB, 0));					// restore mem#
+		}
 		srf = 0;
-		smem(get_memnum(SUB, 0));						// restore mem#
 	}
 	if(srf & 0x80){										// do q/v level
 		srf &= 0x7f;
@@ -1732,7 +1806,7 @@ U8	sputs_lcd(char *s, U8 dp_tf){
 // puts_lcd() translates an ASCII string to 7-seg for sub digits
 //	returns #chars written to display
 //-----------------------------------------------------------------------------
-U8	puts_lcd(char *s, U8 dp_tf, U8 focus){
+U8	puts_lcd(U8 focus, char *s, U8 dp_tf){
 	U8	i;		// temp
 
 	if(focus == MAIN){
@@ -1814,32 +1888,29 @@ void stonea(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// mmema() sets/clears MAIN mem annunc.  Input is T/F
-// smema() sets/clears SUB mem annunc.  Input is T/F
+// mema() sets/clears MAIN/SUB mem annunc.  Input is M/S focus, T/F
 //-----------------------------------------------------------------------------
-void mmema(U8 tf){
+void mema(U8 focus, U8 tf){
 
-	lcd_buf[0] = CS1_MASK | 0x02;
-	lcd_buf[1] = LOAD_PTR | MM_ADDR;
-	if(tf){
-		lcd_buf[2] = OR_DMEM | MM;
+	if(focus == MAIN){
+		lcd_buf[0] = CS1_MASK | 0x02;
+		lcd_buf[1] = LOAD_PTR | MM_ADDR;
+		if(tf){
+			lcd_buf[2] = OR_DMEM | MM;
+		}else{
+			lcd_buf[2] = AND_DMEM | MTNE;
+		}
+		put_spi(lcd_buf, CS_OPENCLOSE);
 	}else{
-		lcd_buf[2] = AND_DMEM | MTNE;
+		lcd_buf[0] = CS2_MASK | 0x02;
+		lcd_buf[1] = LOAD_PTR | SM_ADDR;
+		if(tf){
+			lcd_buf[2] = OR_DMEM | SM;
+		}else{
+			lcd_buf[2] = AND_DMEM | STNE;
+		}
+		put_spi(lcd_buf, CS_OPENCLOSE);
 	}
-	put_spi(lcd_buf, CS_OPENCLOSE);
-	return;
-}
-
-void smema(U8 tf){
-
-	lcd_buf[0] = CS2_MASK | 0x02;
-	lcd_buf[1] = LOAD_PTR | SM_ADDR;
-	if(tf){
-		lcd_buf[2] = OR_DMEM | SM;
-	}else{
-		lcd_buf[2] = AND_DMEM | STNE;
-	}
-	put_spi(lcd_buf, CS_OPENCLOSE);
 	return;
 }
 
@@ -2350,4 +2421,157 @@ void togg_tsab(U8 focus){
 	return;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_xmode() returns xmode[] value
+//-----------------------------------------------------------------------------
+U8 get_xmode(U8 b_id){
 
+	return xmode[b_id];
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// write_xmode() writes the xmode state to the nv memory space
+//-----------------------------------------------------------------------------
+void write_xmode(U8 main){
+	U32	addr;		// temps
+	U8	i = get_band_index(main);
+
+	addr = XMODET_0 + (i * sizeof(U8));
+	rw8_nvr(addr, xmode[i], CS_WRITE|CS_OPENCLOSE);
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// read_xmode() reads the xmode state array from the nv memory space
+//-----------------------------------------------------------------------------
+void read_xmode(void){
+	U32	addr;		// temps
+	U8	i;
+	U8	j;
+
+	j = CS_OPEN;
+	addr = XMODET_0;
+	for(i=0; i<ID1200; i++){
+		if(i == (ID1200 - 1)) j = CS_CLOSE;
+		xmode[i] = rw8_nvr(addr, 0, CS_READ|j);
+		j = CS_READ;
+	}
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// clear_xmode() clears the xmode state to the nv memory space
+//-----------------------------------------------------------------------------
+void clear_xmode(void){
+	U32	addr;		// temps
+	U8	i;
+	U8	j;
+
+	j = CS_WRITE|CS_OPEN;
+	addr = XMODET_0;
+	for(i=0; i<ID1200; i++){
+		if(i == (ID1200 - 1)) j = CS_WRITE|CS_CLOSE;
+		xmode[i] = 0;
+		rw8_nvr(addr, xmode[i], j);
+		j = CS_WRITE;
+	}
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_sys_err() transferrs sys err status to LCD module
+//-----------------------------------------------------------------------------
+void set_sys_err(U8 err){
+
+	sys_err |= err;
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// clr_sys_err() transferrs sys err status to LCD module
+//-----------------------------------------------------------------------------
+void clr_sys_err(U8 err){
+
+	sys_err &= ~err;
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// puts_slide() handles display of long text strings
+//	focus is m/s
+//	sptr is pointer to base string
+//	cmd is 0xff to init, 0x01 to start, 0x00 to slide string 1 chr (left only)
+//	return TRUE if entire slide sequence is complete
+//-----------------------------------------------------------------------------
+U8 puts_slide(U8 focus, char* sptr, U8 cmd){
+	static U8		moffs_idx;		// offset start of display string, main
+	static U8		soffs_idx;		// ... sub
+		   U8*		offsptr;
+		   char*	tptr;
+		   U8		i = 0;			// temp
+#define	MAX_SLIDE 18
+
+	if(focus == MAIN){									// use pointers to diff main vs. sub
+		offsptr = &moffs_idx;
+		tptr = mfbuf;
+	}else{
+		offsptr = &soffs_idx;
+		tptr = sfbuf;
+	}
+	switch(cmd){
+	default:
+	case 0xff:											// IPL init
+		moffs_idx = 0;
+		soffs_idx = 0;
+		slide_time(0xff);
+		break;
+
+	case 0x01:											// start slide
+		*offsptr = 0;
+		copy6str(sptr, tptr, *offsptr);
+		puts_lcd(focus, tptr, 0);
+		break;
+
+	case 0x00:											// run slide
+		*offsptr += 1;
+		i = copy6str(sptr, tptr, *offsptr);				// if i == true, end of slide is reached
+		if(!i){
+			puts_lcd(focus, tptr, 0);
+		}
+		if(*offsptr > MAX_SLIDE) *offsptr = 0;
+		break;
+	}
+	return i;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// copy6str() copies 6 chrs from sptr to dptr, plus a null at dptr
+//	sptr is pointer to source string
+//	dptr is pointer to dest string
+//	return TRUE if source string is empty
+//-----------------------------------------------------------------------------
+U8 copy6str(char* sptr, char* dptr, U8 cidx){
+	U8	i = 0;
+	U8	j = cidx;
+	U8	ccnt = 6;
+
+	do{
+		if(j++ < 6){
+			*dptr++ = ' ';					// copy spaces to start
+			*dptr = '\0';
+		}else{
+			*dptr = *(sptr+cidx-6);			// copy..
+			if(!(*dptr++)) i = 1;				// if source empty, set true return
+		}
+	}while((*(++sptr)) && (--ccnt));		// up to 6 chrs
+	dptr = '\0';
+	return i;
+}

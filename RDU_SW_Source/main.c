@@ -13,23 +13,37 @@
 /********************************************************************
  *  Project scope rev notes:
  *    				 To-do Checklist time!
- *    				 !!! there is a noticable lag in the PTT now.  Need to identify the cycle-hog !!!
+ *    				 !!! there is a noticable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
  *    				 * need to implement system warning messages on LCD and serial ports.
  *    				 * test band switching (VFO button)
- *    				 * Memory/Call mode:
- *    				 	- establish memory map for stored channels
- *    				 	- work out how to swap vfo pointer between VFO mode and memory mode
- *    				 	- MWchr/CALLchr: memory/call mode transitions - need to remember previous mode.  Canceling a mode
- *    				 		transitions back to the previous mode (need a bubble chart here)
- *    				 	- MWchr_H/CALLchr_H: store memory
  *    				 * SET loop:
  *    				 	- DIM brightness setting, LCD and button
  *    				 	- BRT brightness setting, LCD and button
+ *    				 * Scan mode
  *    				 * XIT/RIT adjust (perhaps use VFOchr_H ???)
- *    				 * come up with a way to suppress key-hold beeps if there is no feature implemented for a specific key
  *
  *
  *    Project scope rev History:
+ *    09-19-21 jmh:	 Started >2 module debug.  Deprecated init-3 message array in "init_radio()".  Boot with 1 module now handled correctly
+ *    					and 3 modules also looks OK (need more testing, more modules).  VOL and RX LEDs are muted if bandid is in error.
+ *    				 Implemented "no-func/no-beep" for key presses.  Beeps are now triggered in the "get_key()" (under "process_MS()")
+ *    				 	switch-tree (lcd.c).  This allows the beeps to be controlled there so that inactive keys or holds don't produce
+ *    				 	a beep.
+ *    09-18-21 jmh:	 Added base code for scrolling text displays.  Need to add hooks for vectoring the mode on/off.
+ *    				 Modified mfreq/sfreq to use a file-local error variable and added code to update that variable at IPL to cover the
+ *    				 	no-band and no-base unit scenarios.
+ *    				 Added INFO command to CLI.  Currently displays some NVRAM #defines and NV rev, followed by the version msg.
+ *    				 Increased mem message string to 16 characters.
+ *    09-17-21 jmh:	 Spent some time debugging mem/call modes.  Made several changes to various fns to improve efficiency/readability.
+ *    					mem[], call[], and xmode[] are now isolated arrays that have entries associated with each band-id.
+ *    					mem & call indexed locations are stored with the appropriate VFO in NV space.  xmode[] is stored in NV space
+ *    					in isolation.
+ *    				 ** AND JUST LIKE THAT... mem and call modes seem to be working.  Testing has included cycling between mem/call/vfo,
+ *    				 	M/S swaps, and power cycles.  System state appears to be stable and consistent between these events.
+ *    09-16-21 jmh:	 Re-vamped vfo mems.  Made an array of struct and separated out mem[] and call[] arrays (these don't get copied
+ *    					to temp-space in mem/call modes).  Quick-check shows that the code is at least where it was before the revamp.
+ *    				 PTT-LAG: A search on "wait(" didn't reveal any significant loops in radio.c and lcd.c.  Disabling UART1 (reduces
+ *    				 	time lag due to debug strings) didn't have a significant effect.
  *    09-14-21 jmh:	 Added meat to the memory/call modes.  Save/recall are both coded and basic function is verified.  MW in mem
  *    					mode copies memory to VFO (same as IC-901).  !!! M/S swaps need to swap the temp VFOs, M mode needs to follow
  *    					band in swaps (seems like this isn't how it is working).  Same notes apply to band switching (VFO button).
@@ -272,6 +286,8 @@ U16		mictimer;						// mic button repeat timer
 U8		micdbtimer;						// mic button dbounce timer
 U8		mutetimer;						// vol mute timer
 U16		tstimer;						// TS adj mode timer
+U16		slidetimer;						// txt slide rate timer
+
 U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
 U8		idx;
@@ -341,9 +357,7 @@ char kp_asc(U16 keycode);
 //		freeze the baud rate.  Once frozen, the baud rate can not be changed until
 //		system is reset.
 //*****************************************************************************
-int
-main(void)
-{
+int main(void){
 	volatile uint32_t ui32Loop;
 //	uint32_t i;
 //    uint8_t	tempi;			// tempi
@@ -436,7 +450,7 @@ main(void)
     			fault_found = TRUE;
     		}
         }while(swcmd != SW_ESC);
-        swcmd = 0;
+        swcmd = 0;												// re-arm while-loop and restart...
 /*    	NVIC_DIS0_R = 0xFFFFFFFF;								// disable ISRs
     	NVIC_DIS1_R = 0xFFFFFFFF;
     	NVIC_DIS2_R = 0xFFFFFFFF;
@@ -486,8 +500,7 @@ main(void)
 //		NOTE: gets_tab is only used for command line input and thus should not
 //		see non-ascii data under normal circumstances.
 
-char *gets_tab(char *buf, char *save_buf[], int n)
-{
+char *gets_tab(char *buf, char *save_buf[], int n){
 	char	*cp;
 	char	*sp;
 	char	c;
@@ -668,16 +681,12 @@ U8 set_pttmode(U8 value){
 }
 
 //-----------------------------------------------------------------------------
-// set pwm values
-//-----------------------------------------------------------------------------
-//
 // set_pwm() sets the specified PWM to the percent value
 //	pwmnum specifies the LED number.  LED 0 is the master setting.  This only sets the master,
 //		it does not update any of the LED pwm registers.
 //	percent is the percent level, 0 - 100.  If percent > 100, the value is unchanged
 //		and the PWM settings are calculated based on stored led and master values
-//
-
+//-----------------------------------------------------------------------------
 void set_pwm(U8 pwmnum, U8 percent){
 	U32	kk;				// temp U32
 
@@ -1061,9 +1070,7 @@ char get_key(void){
 
 char keychr_lut[] = { SUBchr, TONEchr, CALLchr, MWchr, TSchr, Tchr, Vupchr, Vdnchr, HILOchr, CHKchr, errorchr,
 					  MSchr, DUPchr, VFOchr, MRchr, MHZchr, SETchr, Qupchr, Qdnchr, HILOchr, CHKchr, SMUTEchr };
-
 //-----------------------------------------------------------------------------
-
 char kp_asc(U16 keycode){
 	U16		ii;			// temps
 	U16		jj;
@@ -1102,34 +1109,23 @@ char kp_asc(U16 keycode){
 }
 
 //-----------------------------------------------------------------------------
-// warm reset
+// warm_reset() triggers primary while-loop in main() to re-start.
 //-----------------------------------------------------------------------------
-//
-// warm_reset() causes main() to re-start.
-//
-
 void warm_reset(void){
 	swcmd = SW_ESC;				// trigger restart
 }
 
 //-----------------------------------------------------------------------------
-// free_run
-//-----------------------------------------------------------------------------
-//
 // free_run() returns value of free-running timer
-//
-
+//-----------------------------------------------------------------------------
 U32 free_run(void){
 	return free_32;				// return timer value
 }
 
 //-----------------------------------------------------------------------------
-// sin_time
+// sin_time() sets/reads the sin activity timer
+//	cmd == 0 reads, all others set timer = cmd
 //-----------------------------------------------------------------------------
-//
-// sin_time() sets/reads the sin activity timer (0 reads)
-//
-
 U8 sin_time(U8 cmd){
 
 	if(cmd){
@@ -1139,12 +1135,9 @@ U8 sin_time(U8 cmd){
 }
 
 //-----------------------------------------------------------------------------
-// sout_time
+// sout_time() sets/reads the sout pacing timer
+//	cmd == 0xff reads, all others set timer = cmd
 //-----------------------------------------------------------------------------
-//
-// sout_time() sets/reads the sout pacing timer (0xff reads)
-//
-
 U8 sout_time(U8 cmd){
 
 	if(cmd != 0xff){
@@ -1154,12 +1147,9 @@ U8 sout_time(U8 cmd){
 }
 
 //-----------------------------------------------------------------------------
-// mhz_time
+// mhz_time() sets/reads the mhz digit timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// mhz_time() sets/reads the mhz digit timer (1 sets, 0xff clears)
-//
-
 U8 mhz_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1174,12 +1164,9 @@ U8 mhz_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// set_time
+// set_time() sets/reads the set-mode timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// set_time() sets/reads the set-mode timer (1 sets, 0xff clears)
-//
-
 U8 set_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1194,12 +1181,9 @@ U8 set_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// v_time
+// v_time() sets/reads the vol/squ timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// v_time() sets/reads the vol/squ timer (1 sets, 0xff clears)
-//
-
 U8 v_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1215,6 +1199,7 @@ U8 v_time(U8 tf){
 
 //-----------------------------------------------------------------------------
 // q_time
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
 //
 // q_time() sets/reads the vol/squ timer (1 sets, 0xff clears)
@@ -1234,12 +1219,9 @@ U8 q_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// ts_time
+// ts_time() sets/reads the ts adj timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// ts_time() sets/reads the ts adj timer (1 sets, 0xff clears)
-//
-
 U8 ts_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1254,12 +1236,9 @@ U8 ts_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// offs_time
+// offs_time() sets/reads the offset digit timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// offs_time() sets/reads the offset digit timer (1 sets, 0xff clears)
-//
-
 U8 offs_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1274,12 +1253,9 @@ U8 offs_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// sub_time
+// sub_time() sets/reads the sub-focus timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// sub_time() sets/reads the sub-focus timer (1 sets, 0xff clears)
-//
-
 U8 sub_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1295,11 +1271,8 @@ U8 sub_time(U8 tf){
 
 //-----------------------------------------------------------------------------
 // mic_time
+//	(tf == 0 reads, 1 sets short delay, 2 sets long delay, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// mic_time() sets/reads the mic button repeat timer (1 sets, 0xff clears)
-//
-
 U8 mic_time(U8 set){
 
 	if(set == 0xff){
@@ -1317,12 +1290,9 @@ U8 mic_time(U8 set){
 }
 
 //-----------------------------------------------------------------------------
-// micdb_time
+// micdb_time() sets/reads the mic button debounce timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// micdb_time() sets/reads the mic button debounce timer (1 sets, 0xff clears)
-//
-
 U8 micdb_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1337,12 +1307,9 @@ U8 micdb_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// mute_time
+// mute_time() sets/reads the vol mute timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// mute_time() sets/reads the vol mute timer (1 sets, 0xff clears)
-//
-
 U8 mute_time(U8 tf){
 
 	if(tf == 0xff){
@@ -1357,20 +1324,31 @@ U8 mute_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
-// set_dial, get_dial
+// slide_time() sets/reads the text slide rate timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
-//
-// set_dial() sets value of main dial reg
-//
+U8 slide_time(U8 tf){
 
+	if(tf == 0xff){
+		slidetimer = 0;
+	}else{
+		if(tf == 1){
+			slidetimer = SLIDE_TIME;
+		}
+	}
+	if(slidetimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// set_dial() sets value of main dial reg
+// get_dial() returns value of main dial reg
+//-----------------------------------------------------------------------------
 void set_dial(S8 value){
 
 	main_dial = value;
 	return;
 }
-
-// get_dial() returns value of main dial reg
-//
 
 S8 get_dial(U8 tf){
 	S8 i = main_dial;
@@ -1412,13 +1390,10 @@ void do_3beep(void){
 
 //-----------------------------------------------------------------------------
 // gpiod_isr
-//-----------------------------------------------------------------------------
-//
 // GPIO_PORTC isr, processes the rotary encoder for MAIN
 //		Simple up-dn counter pulses (not a dual-phase encoder).
 //		!! need to flip-flop through a timer delay  ISR to debounce !!
-//
-
+//-----------------------------------------------------------------------------
 void gpioc_isr(void){
 	U8	maindial_in;
 
@@ -1445,11 +1420,8 @@ void gpioc_isr(void){
 
 //-----------------------------------------------------------------------------
 // set_beep() sets the beep frequency
+//	beep_frq = frequency of pulsed beeper, b_count = # beep pulses to send
 //-----------------------------------------------------------------------------
-//
-// beep_frq = frequency of pulsed beeper
-//
-
 void set_beep(U16 beep_frq, U16 b_count){
 
 	TIMER0_TAILR_R = (uint16_t)(SYSCLK/((U32)beep_frq));				// set period
@@ -1460,11 +1432,8 @@ void set_beep(U16 beep_frq, U16 b_count){
 
 //-----------------------------------------------------------------------------
 // do_beep() sets the beep counter and starts Timer1A
+//	beep_cycles = # of 1KHz cycles to beep.  100 cycles = 0.1 sec
 //-----------------------------------------------------------------------------
-//
-// beep_cycles = # of 1KHz cycles to beep.  100 cycles = 0.1 sec
-//
-
 void do_beep(U16 beep_cycles){
 
 	if(beep_cycles) beep_counter = beep_cycles;
@@ -1475,14 +1444,10 @@ void do_beep(U16 beep_cycles){
 
 //-----------------------------------------------------------------------------
 // Timer0A_ISR
-//-----------------------------------------------------------------------------
-//
 // Called when timer0 A overflows (NORM mode):
 //	used to count cycles of the beep output to establish the beep duration.
 //	when beep_count == 0, ISR turns itself off.
-//
 //-----------------------------------------------------------------------------
-
 void Timer0A_ISR(void){
 
 	TIMER0_ICR_R = TIMER0_MIS_R;
@@ -1494,17 +1459,13 @@ void Timer0A_ISR(void){
 
 //-----------------------------------------------------------------------------
 // Timer3A_ISR
-//-----------------------------------------------------------------------------
-//
 // Called when timer3 A overflows (NORM mode):
 //	intended to update app timers @ 1ms per lsb
 //	also drives RGB "I'm alive" LED.  The LED transitions through the color
 //	wheel in a way that can be modified by the #defines below. RATE, PERIOD,
 //	and START values may be adjusted to taylor the color transitions,
 //	transition rate, and cycle period.
-//
 //-----------------------------------------------------------------------------
-
 void Timer3A_ISR(void){
 //static	U16	prescale;				// prescales the ms rate to the LED update rate
 //		U16	t2_temp;				// temp
@@ -1602,7 +1563,7 @@ static	U16	key_last;				// last key
 					}
 					kphold_timer = KEY_HOLD_TIME;		// set hold timer (~~2 sec)
 					kp_state = KEYP_PRESSED;			// advance state
-					q_beep;
+//					q_beep;
 				}
 			}
 			break;
@@ -1619,8 +1580,8 @@ static	U16	key_last;				// last key
 					if(kbd_hptr == KBD_BUFF_END){		// update buf ptr w/ roll-over
 						kbd_hptr = 0;
 					}
-					beepdly_timer = BEEP2_COUNT;
-					q_beep;
+//					beepdly_timer = BEEP2_COUNT;
+//					q_beep;
 				}else{
 					kphold_timer -= 1;					// update hold timer
 				}
@@ -1695,6 +1656,9 @@ static	U16	key_last;				// last key
 	}
 	if (tstimer != 0){									// update set mode timer
 		tstimer--;
+	}
+	if (slidetimer != 0){								// update text slide timer
+		slidetimer--;
 	}
 	if(num_beeps){
 		if (beepgaptimer != 0){							// update beep gap timer

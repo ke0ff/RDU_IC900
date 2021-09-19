@@ -79,5 +79,6 @@ U8 rw8_nvr(U32 addr, U8 dataw, U8 mode);
 U16 rw16_nvr(U32 addr, U16 dataw, U8 mode);
 U32 rw32_nvr(U32 addr, U32 dataw, U8 mode);
 void rwusn_nvr(U8* dptr, U8 mode);
+void Timer1B_ISR(void);
 
 #endif /* SPI_H_ */

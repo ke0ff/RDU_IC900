@@ -24,7 +24,7 @@
 #define	CHR_DLY0	87					// max char length, UART0, (us) (= 10/baud)
 #define	CHR_DLY1	87					// max char length, UART1, (us) (= 10/baud)
 #define	CHR_DLY2	521					// max char length, UART2, (us) (= 10/baud)
-#define	CHR_WAT0	6					// max delay to wait for UART0 TX to clear (ms)
+#define	CHR_WAT0	2					// max delay to wait for UART0 TX to clear (ms)
 #define	CHR_WAT1	2					// max delay to wait for UART1 TX to clear (ms)
 #define	CHR_WAT2	3					// max delay to wait for UART2 TX to clear (ms)
 

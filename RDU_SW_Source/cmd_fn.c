@@ -30,6 +30,7 @@
 #include "adc.h"
 #include "sio.h"
 #include "radio.h"
+#include "uxpll.h"
 
 //=============================================================================
 // local registers
@@ -57,8 +58,8 @@ enum err_enum{ no_response, no_device, target_timeout };
 // enum list of command numerics
 //	each enum corresponds to a command from the above list (lastcmd corresponds
 //	with the last entry, 0xff)
-const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0NR\0NW\0NC\0U\0TI\0T\0?\0H\0VERS\0\xff"};
-enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,nvrd,nvwr,nvcmd,tstuart1,timer_tst,
+const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0NR\0NW\0NC\0U\0TI\0T\0?\0H\0VERS\0\xff"};
+enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,nvrd,nvwr,nvcmd,tstuart1,timer_tst,
 			   trig_la,help1,help2,vers,lastcmd,helpcmd };
 
 #define	cmd_type	char	// define as char for list < 255, else define as int
@@ -117,6 +118,7 @@ U8	lcd_init_L6[] = { 0x82, 0xfd, 0xb0 };
 
 //				   0123456789012345
 const char un_ary[] = { "RDU-900,ke0ff\0\0\0" };					// init User SN string
+const char teststr[] = { "THIS IS KE0FF " };							// test string
 
 //=============================================================================
 // local Fn declarations
@@ -246,6 +248,18 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					do_help();
 					break;
 
+				case info:														// info + version
+					putsQ("SYSINFO:");
+					sprintf(obuf,"LIM_END = %d",LIM_END);
+					putsQ(obuf);
+					sprintf(obuf,"MEM_LEN = %d",MEM_LEN);
+					putsQ(obuf);
+					sprintf(obuf,"NUM_MEMS = %d",NUM_MEMS);
+					putsQ(obuf);
+					sprintf(obuf,"Last NVRAM = %d (0x%04x)",MEM_END,MEM_END);
+					putsQ(obuf);
+					sprintf(obuf,"NVREV = 0x%04x",nvram_sn());
+					putsQ(obuf);
 				case vers:														// SW VERSION CMD
 					dispSWvers();
 					break;
@@ -537,30 +551,46 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					break;
 
 				case tst_freq:
-					jj = 0;
-					ii = 670L;
-					sprintf(obuf,"%4d  <",ii);
-					putsQ(obuf);
-					ii = 1035L;
-					sprintf(obuf,"%4d  <",ii);
-					putsQ(obuf);
-//					get_BCD32(args[1], &jj);									// get main bcd
-//					sscanf(args[1],"%d",&jj);									// get long decimal freq
-//					mfreq(jj, 0);
-//					jj = 0;
-//					get_BCD32(args[2], &jj);									// get sub bcd
-//					sscanf(args[2],"%d",&jj);									// get long decimal freq
-//					sfreq(jj, 0);
-					params[0] = 0;
-//					params[3] = 0;
-//					params[4] = 0;
-					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
-					msmet(params[0], 0);
-					ssmet(params[0], 0);
-//					mtonea(params[3]);
-//					mmema(params[4]);
-//					s = args[6];
-//					mdupa(*(++s));
+					if(ps){
+						puts_slide(SUB, (char*)teststr, 1);
+						i = 0;
+						do{
+							if(!slide_time(0)){
+//								i = puts_slide(SUB, get_nameptr(SUB), 0);
+								i = puts_slide(SUB, (char*)teststr, 0);
+								slide_time(1);
+							}
+							if(i){
+								i = 0;
+								putsQ("slid");
+							}
+						}while(bchar != ESC);
+					}else{
+						jj = 0;
+						ii = 670L;
+						sprintf(obuf,"%4d  <",ii);
+						putsQ(obuf);
+						ii = 1035L;
+						sprintf(obuf,"%4d  <",ii);
+						putsQ(obuf);
+	//					get_BCD32(args[1], &jj);									// get main bcd
+	//					sscanf(args[1],"%d",&jj);									// get long decimal freq
+	//					mfreq(jj, 0);
+	//					jj = 0;
+	//					get_BCD32(args[2], &jj);									// get sub bcd
+	//					sscanf(args[2],"%d",&jj);									// get long decimal freq
+	//					sfreq(jj, 0);
+						params[0] = 0;
+	//					params[3] = 0;
+	//					params[4] = 0;
+						get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+						msmet(params[0], 0);
+						ssmet(params[0], 0);
+	//					mtonea(params[3]);
+	//					mmema(params[4]);
+	//					s = args[6];
+	//					mdupa(*(++s));
+					}
 					break;
 
 				case adc_tst:													// CIV test cmd
@@ -897,8 +927,8 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						case 'f':
 							putsQ("freq test.\n");
 //							mfreq(0x045450L, 0);
-							mfreq(29450L, 0, 0);
-							sfreq(1296450L, 0, 0);
+							mfreq(29450L, 0);
+							sfreq(1296450L, 0);
 							if(bchar != ESC) bchar = 0;
 							break;
 

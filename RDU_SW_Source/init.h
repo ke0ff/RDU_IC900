@@ -54,6 +54,7 @@
 #define SEC75MS    74
 #define SEC100MS  100
 #define SEC250MS  250
+#define SEC300MS  300
 #define SEC500MS  500
 #define SEC750MS  750
 #define SEC1     1000
@@ -384,6 +385,7 @@ U8 mic_time(U8 tf);
 U8 micdb_time(U8 tf);
 U8 mute_time(U8 tf);
 U8 ts_time(U8 tf);
+U8 slide_time(U8 tf);
 
 void set_beep(U16 beep_frq, U16 b_count);
 void do_beep(U16 beep_cycles);

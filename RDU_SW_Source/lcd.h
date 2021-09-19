@@ -33,18 +33,27 @@
 #define	VMODE_ISTX		0x40	// tx mode
 #define	VMODE_ODISP		0x80	// display offset
 
+// process_VFODISP defines
+#define	TONE_DISP		0x01
+#define	TS_DISP			0x02
+#define	NORM_DISP		0x03
+#define	TXTSLID_DISP	0x04
+
 //#define VFOTR_IS_TX		0x40	// flag to signal fetch of vfotr to display TX frequency from uxpll update
 //#define VFO_DISP_F		0x80	// flag to signal vfo display update
 
-// X-flags
-#define	VOL_XFLAG		0x01
-#define	SQU_XFLAG		0x02
-#define	TONE_XFLAG		0x04
-#define	OFFS_XFLAG		0x08
-#define	MEMM_XFLAG		0x10
-#define	MEMS_XFLAG		0x20
-#define	CALLM_XFLAG		0x40
-#define	CALLS_XFLAG		0x80
+// Xq-flags
+#define	VOL_XFLAG		0x01		// VOL display/edit active
+#define	SQU_XFLAG		0x02		// SQU display/edit active
+#define	TONE_XFLAG		0x04		// tone display/edit active
+#define	OFFS_XFLAG		0x08		// offset display/edit active
+#define	TEXTM_SLIDE		0x10		// text slider display active flags (M/S)
+#define	TEXTS_SLIDE		0x20
+
+// XMODE flags
+#define	MEM_XFLAG		0x10
+#define	CALL_XFLAG		0x20
+#define	MC_XFLAG		(MEM_XFLAG|CALL_XFLAG)
 
 // chkmode flags
 #define	REV_FLAG		0x01		// reverse mode enabled
@@ -54,9 +63,12 @@
 #define	MS_MUTE			0x01		// both bands band mute
 #define	SUB_MUTE		0x02		// sub band mute
 
-// freq display Fn error flags
-#define	NO_UX_PRSNT	1
-#define	NO_B_PRSNT	2
+// sys_err (freq display Fn error flags)
+#define	NO_MUX_PRSNT	0x01		// no main band present
+#define	NO_SUX_PRSNT	0x02		// no sub band present
+#define	NO_B_PRSNT		0x04		// no base present
+
+// mfreq/sfreq blink flags
 #define	LEAD0_BLINK	0xff
 #define	MAIN_CS		0x80			// sets main lcd chip in digblink()
 
@@ -65,11 +77,13 @@
 #define	MHZ_OFF		0x20
 #define	MHZ_MASK	0x1f
 
+// LCD chip command masks
 #define	CS2_MASK	0x80
 #define	CS1_MASK	0x40
 #define	DA_CM_MASK	0x20
 #define	LEN_MASK	0x1f
 
+// LCD chip commands
 #define	MODE_SET	0x49			// /3 time-div, 1/3 bias, 2E-8 fdiv
 #define	BLINK_SLOW	0x1A			// low-bit is flash-rate
 #define	BLINK_FAST	0x1B			//  "   " ...
@@ -88,11 +102,11 @@
 #define	AND_BMEM	0x80			// OR with (0x0f masked data)
 #define	CLR_BMEM	0x00
 
-#define	MAX_SRF		7
+#define	MAX_SRF		7				// #srf bargraph segments
 #define	MSMET_ADDR	0x06
 #define	SSMET_ADDR	0x1b
 
-// LCD segment bit defines
+// LCD segment bit defines (addr and segment map)
 //	CS1
 #define	MMEM_ADDR		0x01
 #define	MDUP		0x1
@@ -182,8 +196,8 @@ void init_lcd(void);
 void reset_lcd(void);
 void process_UI(U8 cmd);
 void digblink(U8 digaddr, U8 tf);
-void mfreq(U32 dfreq, U8 blink, U8 off_err);
-void sfreq(U32 dfreq, U8 blink, U8 off_err);
+void mfreq(U32 dfreq, U8 blink);
+void sfreq(U32 dfreq, U8 blink);
 void msmet(U8 srf, U8 blink);
 void ssmet(U8 srf, U8 blink);
 U8 mputs_lcd(char *s, U8 dp_tf);
@@ -191,9 +205,8 @@ U8 sputs_lcd(char *s, U8 dp_tf);
 void mmem(U8 mn);
 void smem(U8 mn);
 void mtonea(U8 tf);
-void mmema(U8 tf);
+void mema(U8 focus, U8 tf);
 void stonea(U8 tf);
-void smema(U8 tf);
 void mdupa(char dplx);
 void sdupa(char dplx);
 void mdupa_blink(U8 tf);
@@ -214,3 +227,10 @@ void set_vfo_display(U8	sig);
 void rev_vfo(U8	focus);
 void force_push(void);
 U8 get_mutefl(void);
+U8 get_xmode(U8 b_id);
+void write_xmode(U8 main);
+void read_xmode(void);
+void clear_xmode(void);
+void set_sys_err(U8 err);
+void clr_sys_err(U8 err);
+U8 puts_slide(U8 focus, char* sptr, U8 cmd);

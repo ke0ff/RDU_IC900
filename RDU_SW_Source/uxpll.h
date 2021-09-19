@@ -24,15 +24,13 @@
 #define ID1200	0x06
 #define IDBUNIT	0x07
 #define BAND_ERROR	0xff
-#define	NUM_VFOS	(ID1200 + 2)		// one for each UX band, and 2 to hold main and sub recalled memory
+#define	NUM_VFOS	(ID1200 * 2)		// 2 for each UX band
 #define ID10M_IDX	0x00				// ordinal index values
 #define ID6M_IDX	0x01
 #define ID2M_IDX	0x02
 #define ID220_IDX	0x03
 #define ID440_IDX	0x04
 #define ID1200_IDX	0x05
-#define IDMMVFO_IDX	0x06
-#define IDSMVFO_IDX	0x07
 
 #define ID10M_B		0x01				// bitmapped ID numbers
 #define ID6M_B		0x02
@@ -40,6 +38,8 @@
 #define ID220_B		0x08
 #define ID440_B		0x10
 #define ID1200_B	0x20
+
+#define IDALL_B		(ID10M_B | ID6M_B | ID2M_B | ID220_B | ID440_B | ID1200_B)
 
 // RX base freqs (KHz)
 #define BASE_RX_10M		28000L

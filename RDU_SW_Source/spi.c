@@ -357,7 +357,6 @@ U32 rw32_nvr(U32 addr, U32 dataw, U8 mode)
  */
 void rwusn_nvr(U8* dptr, U8 mode)
 {
-	U16	ii;
 	U8	i;
 	U8	j;
 
@@ -383,8 +382,7 @@ void rwusn_nvr(U8* dptr, U8 mode)
 //
 //-----------------------------------------------------------------------------
 
-void Timer1B_ISR(void)
-{
+void Timer1B_ISR(void){
 
 	// clear ISR flags
 	TIMER1_ICR_R = TIMER1_MIS_R & TIMER_MIS_BMASK;

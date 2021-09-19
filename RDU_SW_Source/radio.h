@@ -29,6 +29,20 @@
 #define	XIT_HIB_ADR		3
 #define	RIT_HIB_ADR		7
 
+// VFO struct
+struct vfo_struct {
+	U32	vfo;						// main vfo frequency (RX) in KHz
+	U16	offs;						// TX offset in KHz
+	U8	dplx;						// duplex/RFpwr/XIT/MEM - packed flags for each resource
+	U8	ctcss;						// PL setting and "OFF" control bit
+	U8	sq;							// SQ setting
+	U8	vol;						// VOL setting
+	U8	bflags;						// expansion flags
+	U8	scanflags;					// scan flags (expansion)
+	U8	tsa;						// frq step "A" setting
+	U8	tsb;						// frq step "B" setting
+};
+
 // NVRAM memory map
 #define	NVRAM_BASE	(0L)
 // Each VFO is stored to NVRAM as a "union" with individual elements of disparate arrays
@@ -37,27 +51,29 @@
 #define	OFFS_0		(VFO_0 + (sizeof(U32)))		// TX offset freq
 #define	DPLX_0		(OFFS_0 + (sizeof(U16)))	// duplex/RFpwr/XIT/MEM
 #define	CTCSS_0		(DPLX_0 + sizeof(U8))		// PL setting
-#define	TSA_0		(CTCSS_0 + sizeof(U8))		// frq step "A"
-#define	TSB_0		(TSA_0 + sizeof(U8))		// frq step "B"
-#define	SQ_0		(TSB_0 + sizeof(U8))		// SQ
+#define	SQ_0		(CTCSS_0 + sizeof(U8))		// SQ
 #define	VOL_0		(SQ_0 + sizeof(U8))			// VOL
 #define	MEM_0		(VOL_0 + sizeof(U8))		// mem#
 #define	CALL_0		(MEM_0 + sizeof(U8))		// call-mem#
 #define	BFLAGS_0	(CALL_0 + sizeof(U8))		// expansion flags
 #define	SCANFLAGS_0	(BFLAGS_0 + sizeof(U8))		// scan (expansion) flags
+#define	TSA_0		(SCANFLAGS_0 + sizeof(U8))		// frq step "A"
+#define	TSB_0		(TSA_0 + sizeof(U8))		// frq step "B"
 
-#define	VFO_LEN		((SCANFLAGS_0 + sizeof(U8)) - VFO_0)
+#define	VFO_LEN		((TSB_0 + sizeof(U8)) - VFO_0)
 #define	XIT_0		((VFO_LEN * NUM_VFOS) + VFO_0)		// xit reg
 #define	RIT_0		(XIT_0 + sizeof(U8))		// rit reg
 #define	BIDM_0		(RIT_0 + sizeof(U8))		// bandidm reg
 #define	BIDS_0		(BIDM_0 + sizeof(U8))		// bandids reg
 #define	VFO_END		(BIDS_0 + sizeof(U8))		// start of next segment
 
-#define	TXULIM_0	VFO_END						// TX upper limits (per band)
-#define	TXLLIM_0	(TXULIM_0 + (sizeof(U32) * ID1200)) // TX lower limits (per band)
-#define	LIM_END		(TXLLIM_0 + (sizeof(U32) * ID1200))	// start of next segment
+#define	XMODET_0	VFO_END						// xmode flags
 
-#define	MEM_NAME_LEN	12
+#define	TXULIM_0	(XMODET_0 + ((sizeof(U8) * ID1200)))	// TX upper limits (per band)
+#define	TXLLIM_0	(TXULIM_0 + ((sizeof(U32) * ID1200)))	// TX lower limits (per band)
+#define	LIM_END		(TXLLIM_0 + ((sizeof(U32) * ID1200)))	// start of next segment
+
+#define	MEM_NAME_LEN	16
 #define	MEM0_BASE	(LIM_END)
 					// mem structure follows this format:
 					// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
@@ -86,7 +102,7 @@
 #define	DPLX_MASK		(DPLX_P | DPLX_M)	// field mask
 #define	LOHI_F			0x04				// low power if == 1
 #define	TSA_F			0x08				// use TSA if == 1
-#define	MEMODE_F		0x10				// memory mode active if == 1
+//#define	MEMODE_F		0x10				// memory mode active if == 1
 
 #define	XIT_REG			0x0f				// xit register (0x08 is dir, 0x07 is count)
 
@@ -136,6 +152,7 @@
 #define	MIC_DB_TIME		20			// mic u/d button debounce wait period
 #define	MUTE_TIME		250			// volume mute delay for band swaps
 #define	TSW_TIME		SEC10		// TS adj timeout
+#define	SLIDE_TIME		SEC300MS	// text slider display rate shift rate
 
 // set/read_tsab():
 #define	TSA_SEL			1			// selects TSA
@@ -179,7 +196,7 @@ U8 read_tsab(U8 main, U8 absel);
 void set_tsab(U8 main, U8 absel, U8 value);
 void set_ab(U8 main, U8 tf);
 S32 set_mhz_step(S32 sval);
-S8 is_mic_updn(void);
+S8 is_mic_updn(U8 ipl);
 U32 get_freq(U8 main);
 void copy_vfot(U8 main);
 void temp_vfo(U8 main);
@@ -205,3 +222,5 @@ void write_nvmem(U8 band, U8 memnum);
 void read_nvmem(U8 band, U8 memnum);
 void copy_vfo2temp(U8 focus);
 void copy_temp2vfo(U8 focus);
+void save_mc(U8 focus);
+char* get_nameptr(U8 focus);

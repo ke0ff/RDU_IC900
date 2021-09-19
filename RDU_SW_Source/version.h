@@ -21,7 +21,7 @@
 
 #ifdef VERSOURCE
 const S8    version_number[] = {"0.0"};
-const S8    date_code[]      = {"06-Aug-2021"};
+const S8    date_code[]      = {"19-Sep-2021"};
 #endif
 
 //-----------------------------------------------------------------------------

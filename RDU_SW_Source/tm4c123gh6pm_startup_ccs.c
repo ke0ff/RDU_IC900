@@ -27,6 +27,7 @@
 #include "init.h"
 #include "serial.h"
 #include "sio.h"
+#include "spi.h"
 #include "inc/tm4c123gh6pm.h"
 
 //*****************************************************************************

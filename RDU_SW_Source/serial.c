@@ -87,7 +87,7 @@ char getchr_b(void);
 char gotchr_b(void);
 char do_txeot(void);
 U32 config_uart0(U32 baud);
-void jam_wait(void);
+//void jam_wait(void);
 void txstart1(void);
 
 //********************//
