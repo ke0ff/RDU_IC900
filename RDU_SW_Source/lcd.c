@@ -198,7 +198,7 @@ void process_UI(U8 cmd){
 		chkmode = 0;
 		vfo_display = 0;
 		update_lcd();
-		process_MS(cmd);												// trigger main/sub process IPL init
+		process_MS(0xff);												// trigger main/sub process IPL init
 		is_mic_updn(1);													// init mic u/d repeat
 	}else{
 		//**************************************
@@ -810,6 +810,7 @@ U8 process_MS(U8 mode){
 					set_next_band(band_focus);
 					update_lcd();
 					force_push();										// force update to NVRAM
+					set_bandnv();
 				}else{
 					b = 0;	// no beep
 				}
@@ -1297,6 +1298,7 @@ U32 process_DIAL(U8 focus){
 		}
 	}else{
 		if(tsdisplay){
+			// freq step select mode
 			if(j){
 				if(read_tsab(focus, TSB_SEL) == TS_10){
 					set_tsab(focus, TSB_SEL, TS_25);
@@ -1344,7 +1346,7 @@ U32 process_DIAL(U8 focus){
 					update_lcd();
 				}else{
 					if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
-						// No thumbwheel mode:
+						// MHZ (No thumbwheel) mode:
 						i = add_vfo(focus, j, maddr);			// update vfo
 						if(i && (focus == MAIN)){
 							mfreq(get_freq(MAIN), 0);			// update display

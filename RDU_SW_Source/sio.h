@@ -85,6 +85,7 @@ void send_so(uint32_t data);
 
 U32 get_sin(void);
 char got_sin(void);
+void flush_sin(void);
 void gpiof_isr(void);
 void Timer2A_ISR(void);
 

@@ -153,7 +153,6 @@ void send_so(uint32_t data)
 //	uses circular buffer sin_buf[] which is filled in the TIMER2A interrupt
 //-----------------------------------------------------------------------------
 U32 get_sin(void){
-
 	U32 c = 0L;
 
 	if(sin_tptr != sin_hptr){						// if head != tail,
@@ -175,6 +174,15 @@ char got_sin(void){
     	c = TRUE;									// .. set chr ready to get flag
 	}
 	return c;
+}
+
+//-----------------------------------------------------------------------------
+// flush_sin empties the input buffer.
+//-----------------------------------------------------------------------------
+void flush_sin(void){
+
+	sin_tptr = sin_hptr;							// make tail == head,
+	return;
 }
 
 //-----------------------------------------------------------------------------

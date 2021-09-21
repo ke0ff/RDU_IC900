@@ -24,6 +24,10 @@
  *
  *
  *    Project scope rev History:
+ *    09-20-21 jmh:	 Continued >2 module debug.  Chased issue where mem/call IPL recall wasn't working.  Looks to be fixed.
+ *    				 Revamped IPL init code to more closely follow original IC-900 flow.
+ *    				 Fixed problem with UX129 PLL code: wasn't storing end of buffer semaphore.
+ *    				 Added timing fixes to init_radio sout calls.
  *    09-19-21 jmh:	 Started >2 module debug.  Deprecated init-3 message array in "init_radio()".  Boot with 1 module now handled correctly
  *    					and 3 modules also looks OK (need more testing, more modules).  VOL and RX LEDs are muted if bandid is in error.
  *    				 Implemented "no-func/no-beep" for key presses.  Beeps are now triggered in the "get_key()" (under "process_MS()")
@@ -632,8 +636,8 @@ char process_IO(U8 flag){
 		// init LCD
 		init_lcd();
 		ptt_mode = 0xff;								// force init
+		process_SOUT(flag);								// ! SOUT init must execute before SIN init !
 		process_SIN(flag);
-		process_SOUT(flag);
 		process_UI(flag);
 //		process_CCMD(flag);
 	}

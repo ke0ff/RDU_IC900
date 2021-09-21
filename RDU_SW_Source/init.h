@@ -71,7 +71,7 @@
 #define	ONEMIN	(SEC60)
 #define	REG_WAIT_DLY 200			// 200ms wait limit for register action
 #define RESP_SAMP SEC100MS			// sets resp rate
-#define	SOUT_PACE_TIME	8			// 33/4800 s for one SOUT msg
+#define	SOUT_PACE_TIME	9			// 33/4800 s for one SOUT msg
 
 // ssi bit rate defns
 // BR = SYSCLK/(CPSR * (1 + SCR))

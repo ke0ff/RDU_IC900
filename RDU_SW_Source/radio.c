@@ -102,6 +102,9 @@ U8	ux129_rit_t;
 U8	bandid_m;							// bandid for main (index into above data structures)
 U8	bandid_s;							// bandid for sub (index into above data structures)
 
+U8	bandoff_m;							// band-off registers
+U8	bandoff_s;
+
 U32	vfot;								// temp vfo used for calculations and TX frequency
 U32	vfotr;								// tr vfo
 U32	mhz_step;							// mhz digit add value - tracks the digit index in the thumbwheel digit adjust mode
@@ -161,7 +164,7 @@ U8 get_busy(void);
 /****************
  * init_radio is called at IPL and initializes the data structures and radio hardware for the radio Fns
  */
-U32 init_radio(void){
+void init_radio(void){
 	U8	i;
 	U8	j;
 	U8	k;
@@ -173,12 +176,14 @@ U32 init_radio(void){
 	// send init array 1 (reset)
 	for(i=0; i<SO_INIT_LENA; i++){						// do base module reset
 		send_so(so_inita[i]);
-		wait(10);
+		wait(SOUT_PACE_TIME);
 	}
 	// send init array 2 (UX module query)
 	ux_present_flags = 0;								// start with no modules
+	flush_sin();										// clear SIN buffer
 	for(i=0, j=0x01; i<SO_INIT_LENB; i++, j<<=1){
 		send_so(so_initb[i]);							// send a query message to each possible module
+		wait(SOUT_PACE_TIME);
 		if(get_busy()){
 			ux_present_flags |= j;						// and set the present flag if the busy bit is active
 		}
@@ -323,8 +328,38 @@ U32 init_radio(void){
 	if(bandid_s == BAND_ERROR) i |= NO_SUX_PRSNT;
 	if(bandid_m == BAND_ERROR) i |= NO_MUX_PRSNT;
 	set_sys_err(i);
+
+	read_xmode();										// pull xmode from NVRAM
+	k = get_xmode(bandid_m);							// get main b-id
+	if(k & MEM_XFLAG){									// if mem mode,
+		read_mem(MAIN, mem[bandid_m]);					// copy mem
+	}else{
+		if(k & CALL_XFLAG){								// if call mode,
+			read_mem(MAIN, call[bandid_m]);				// copy call mem
+		}
+	}
+	k = get_xmode(bandid_s);							// get sub b-id
+	if(k & MEM_XFLAG){									// if mem mode,
+		read_mem(SUB, mem[bandid_s]);					// copy vfo to temp
+	}else{
+		if(k & CALL_XFLAG){								// if call mode,
+			read_mem(SUB, call[bandid_s]);				// copy call mem
+		}
+	}
+	force_push_radio();
 	update_radio_all();									// force radio update
-	return 0;
+	i = 0;
+	while(i < 3){
+		if(process_SOUT(0) == 0){
+			i++;
+		}
+	}
+	wait(SOUT_PACE_TIME);
+	send_so(0x38800021);								// this is what the IC-901 does... times 2 ???
+	wait(SOUT_PACE_TIME);
+	send_so(0x38800021);
+	wait(SOUT_PACE_TIME);
+	return;
 }
 
 //-----------------------------------------------------------------------------
@@ -387,10 +422,12 @@ void  process_SIN(U8 cmd){
 //		sin_flags (PTT, srf, cos)
 //		sout_flags (vfo freq, T, SQU/D, VOLU/D)
 //		uses a U32 buffer array to sequence SOUT data to be sent
+//	returns pll_ptr .. if == 0xff, send is idle.
 //-----------------------------------------------------------------------------
-void  process_SOUT(U8 cmd){
+U8 process_SOUT(U8 cmd){
 			U8	i;				// temp
-//			U8	j;
+			U8	j;
+			U8	k = 0;
 	static	U8	xit_count;		// used to mechanize UX-129 XIT/RIT adjustment sequences
 	static	U8	xit_dir;
 			U32* pptr;			// pointer into SOUT buffer
@@ -403,107 +440,127 @@ void  process_SOUT(U8 cmd){
 		xit_dir = 0;
 //		sout_flags = 0;
 	}else{											// normal (run) branch
-		// no data is being sent branch ...
 		if(pll_ptr == 0xff){
-			if(sin_flags & SIN_SEND_F){													// PTT change detected
-				if(sin_addr1 & SIN_SEND){
-					i = 1;																// determine new state of PTT
-				}
-				else{
-					i = 0;
-				}
-				amtx(i^1);																// update TX LED
-				setpll(bandid_m, pll_buf, i, MAIN);										// PTT only drives MAIN band, set the module for TX
-				set_vfo_display(VMODE_ISTX | MAIN);
-				pll_ptr = 0;															// enable data send
-				sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
-				putsQ(dgbuf);
-				sin_flags &= ~SIN_SEND_F;												// clear the signal
-			}else{
-				// process sout signals
-				if(sout_flags){															// if not zero, there are (bit-mapped) signals to process
-					pptr = pll_buf;														// preset sout buffer pointer
-					// get an ordinal value for the highest priority signal
-					if(mute_time(0)){
-						i = get_bit(sout_flags & ~(SOUT_MVOL_F|SOUT_SVOL_F));			// if mute delay, mask off vol flags
-					}else{
-						i = get_bit(sout_flags);
+			// no data is being sent branch ...
+			j = 0;
+			if(bandoff_m){																// turn-off band module flag trap, main
+				pll_buf[j++] = bandoff_m << 27;
+				pll_ptr = 0;
+				bandoff_m = 0;															// clear signal flag
+				pll_buf[j] = 0xffffffffL;
+				k = 0xff;															// processing...
+			}
+			if(bandoff_s){																// turn-off band module flag trap, main
+				pll_buf[j++] = bandoff_s << 27;
+				pll_ptr = 0;
+				bandoff_s = 0;															// clear signal flag
+				pll_buf[j] = 0xffffffffL;
+				k = 0xff;															// processing...
+			}
+			if(!j){
+				if(sin_flags & SIN_SEND_F){													// PTT change detected
+					if(sin_addr1 & SIN_SEND){
+						i = 1;																// determine new state of PTT
 					}
-					switch(i){															// this will mechanize the various updates to process in order without collision
-					case SOUT_VFOM_N:
-						if(sin_addr1 & SIN_SEND) i = 1;									// get current state of PTT
-						else i = 0;
-						pptr = setpll(bandid_m, pll_buf, i, MAIN);						// update main pll
-						pll_ptr = 0;
-						sout_flags &= ~SOUT_VFOM_F;										// clear the signal
-						set_vfo_display(MAIN);											// send disp update signal
-						save_vfo(bandid_m);												// save affected VFO
-						break;
-
-					case SOUT_VFOS_N:
-						setpll(bandid_s, pptr, 0, SUB);									// update main pll
-						pll_ptr = 0;
-						sout_flags &= ~SOUT_VFOS_F;
-						set_vfo_display(SUB_D);											// send disp update signal
-						save_vfo(bandid_s);												// save affected VFO
-						break;
-
-					case SOUT_MVOL_N:													// process VOL/SQU triggers...
-						if((mute_band & MS_MUTE) || (bandid_m > ID1200_IDX)){
-							i = 0;														// 0 if muted
+					else{
+						i = 0;
+					}
+					amtx(i^1);																// update TX LED
+					setpll(bandid_m, pll_buf, i, MAIN);										// PTT only drives MAIN band, set the module for TX
+					set_vfo_display(VMODE_ISTX | MAIN);
+					pll_ptr = 0;															// enable data send
+					sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
+					putsQ(dgbuf);
+					sin_flags &= ~SIN_SEND_F;												// clear the signal
+					k = 0xff;															// processing...
+				}else{
+					// process sout signals
+					if(sout_flags){															// if not zero, there are (bit-mapped) signals to process
+						pptr = pll_buf;														// preset sout buffer pointer
+						// get an ordinal value for the highest priority signal
+						if(mute_time(0)){
+							i = get_bit(sout_flags & ~(SOUT_MVOL_F|SOUT_SVOL_F));			// if mute delay, mask off vol flags
 						}else{
-							i = vfo_p[bandid_m].vol;
+							i = get_bit(sout_flags);
 						}
-						pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
-						pll_ptr = 0;
-						sout_flags &= ~SOUT_MVOL_F;										// clear signal flag
-						pll_buf[1] = 0xfffffffeL;										// set to confirm mute
-						break;
+						switch(i){															// this will mechanize the various updates to process in order without collision
+						case SOUT_VFOM_N:
+							if(sin_addr1 & SIN_SEND) i = 1;									// get current state of PTT
+							else i = 0;
+							pptr = setpll(bandid_m, pll_buf, i, MAIN);						// update main pll
+							pll_ptr = 0;
+							sout_flags &= ~SOUT_VFOM_F;										// clear the signal
+							set_vfo_display(MAIN);											// send disp update signal
+							save_vfo(bandid_m);												// save affected VFO
+							break;
 
-					case SOUT_SVOL_N:
-						if((mute_band & SUB_MUTE) || (bandid_s > ID1200_IDX)){
-							i = 0;
-						}else{
-							i = vfo_p[bandid_s].vol;
+						case SOUT_VFOS_N:
+							setpll(bandid_s, pptr, 0, SUB);									// update main pll
+							pll_ptr = 0;
+							sout_flags &= ~SOUT_VFOS_F;
+							set_vfo_display(SUB_D);											// send disp update signal
+							save_vfo(bandid_s);												// save affected VFO
+							break;
+
+						case SOUT_MVOL_N:													// process VOL/SQU triggers...
+							if((mute_band & MS_MUTE) || (bandid_m > ID1200_IDX)){
+								i = 0;														// 0 if muted
+							}else{
+								i = vfo_p[bandid_m].vol;
+							}
+							pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
+							pll_ptr = 0;
+							sout_flags &= ~SOUT_MVOL_F;										// clear signal flag
+							pll_buf[1] = 0xfffffffeL;										// set to confirm mute
+							break;
+
+						case SOUT_SVOL_N:
+							if((mute_band & SUB_MUTE) || (bandid_s > ID1200_IDX)){
+								i = 0;
+							}else{
+								i = vfo_p[bandid_s].vol;
+							}
+							pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
+							pll_ptr = 0;
+							sout_flags &= ~SOUT_SVOL_F;										// clear signal flag
+							pll_buf[1] = 0xfffffffeL;										// set to confirm mute
+							break;
+
+						case SOUT_MSQU_N:
+							pll_buf[0] = atten_calc(vfo_p[bandid_m].sq) | ATTEN_MAIN | SQU_ADDR;
+							pll_ptr = 0;
+							sout_flags &= ~SOUT_MSQU_F;										// clear signal flag
+							pll_buf[1] = 0xffffffffL;
+							break;
+
+						case SOUT_SSQU_N:
+							pll_buf[0] = atten_calc(vfo_p[bandid_s].sq) | ATTEN_SUB | SQU_ADDR;
+							pll_ptr = 0;
+							sout_flags &= ~SOUT_SSQU_F;										// clear signal flag
+							pll_buf[1] = 0xffffffffL;
+							break;
+
+						case SOUT_TONE_N:													// send tone message
+							pll_buf[0] = (U32)vfo_p[bandid_m].ctcss | TONE_ADDR;
+							pll_ptr = 0;
+							pll_buf[1] = 0xffffffffL;
+							sout_flags &= ~SOUT_TONE_F;										// clear signal flag
+							break;
+
+						default:
+						case SOUT_VUPD_N:
+							push_vfo();														// save VFO
+							sout_flags &= ~SOUT_VUPD_F;
+							break;
 						}
-						pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
-						pll_ptr = 0;
-						sout_flags &= ~SOUT_SVOL_F;										// clear signal flag
-						pll_buf[1] = 0xfffffffeL;										// set to confirm mute
-						break;
-
-					case SOUT_MSQU_N:
-						pll_buf[0] = atten_calc(vfo_p[bandid_m].sq) | ATTEN_MAIN | SQU_ADDR;
-						pll_ptr = 0;
-						sout_flags &= ~SOUT_MSQU_F;										// clear signal flag
-						pll_buf[1] = 0xffffffffL;
-						break;
-
-					case SOUT_SSQU_N:
-						pll_buf[0] = atten_calc(vfo_p[bandid_s].sq) | ATTEN_SUB | SQU_ADDR;
-						pll_ptr = 0;
-						sout_flags &= ~SOUT_SSQU_F;										// clear signal flag
-						pll_buf[1] = 0xffffffffL;
-						break;
-
-					case SOUT_TONE_N:													// send tone message
-						pll_buf[0] = (U32)vfo_p[bandid_m].ctcss | TONE_ADDR;
-						pll_ptr = 0;
-						pll_buf[1] = 0xffffffffL;
-						sout_flags &= ~SOUT_TONE_F;										// clear signal flag
-						break;
-
-					default:
-					case SOUT_VUPD_N:
-						push_vfo();														// save VFO
-						sout_flags &= ~SOUT_VUPD_F;
-						break;
+						if(pll_ptr == 0) k = 0xff;											// processing...
 					}
 				}
 			}
-		// data is being sent branch ...
 		}else{
+			// data is being sent branch ...
 			// wait for pacing timer
+			k = 0xff;																// set "processing" flag
 			if(!sout_time(0xff)){														// check for the pacing timer to expire
 				// send buffer, 1 word/pass
 				if((pll_buf[pll_ptr] & 0xfffffff0) != 0xfffffff0){						// (almost) all "f's" is end of buffer semaphore
@@ -531,6 +588,7 @@ void  process_SOUT(U8 cmd){
 						}else{
 							xit_count = (U8)(pll_buf[pll_ptr] & UX_XIT_COUNT) << 1;		// set up the count and direction
 							xit_dir = (U8)(pll_buf[pll_ptr] & UX_XIT_UP);
+							if(xit_count == 0) pll_ptr++;								// X/RIT done... next pll buffer
 						}
 					}
 				}else{
@@ -542,6 +600,7 @@ void  process_SOUT(U8 cmd){
 			}
 		}
 	}
+	return k;
 }
 
 //-----------------------------------------------------------------------------
@@ -612,7 +671,7 @@ void  save_mc(U8 focus){
 
 	if(focus == MAIN) i = bandid_m;
 	else i = bandid_s;
-	j=MEM_0 + (VFO_LEN * i);
+	j = MEM_0 + (VFO_LEN * (U32)i);
 	rw8_nvr(j, mem[i], CS_WRITE | CS_OPEN);			// mem & call are adjacent in the NV map
 	rw8_nvr(j, call[i], CS_WRITE | CS_CLOSE);
 	return;
@@ -836,7 +895,7 @@ void  vfo_change(U8 band){
 void  update_radio_all(void){
 
 	sin_flags = SIN_SQS_F|SIN_MSRF_F|SIN_SSRF_F|SIN_SEND_F|SIN_DSQ_F|SIN_SEL_F|SIN_VFOM_F|SIN_VFOS_F;
-	sout_flags = SOUT_TONE_F|SOUT_MSQU_F|SOUT_SSQU_F|SOUT_MVOL_F|SOUT_SVOL_F|SOUT_VFOS_F|SOUT_VFOM_F;
+	sout_flags = SOUT_MSQU_F|SOUT_SSQU_F|SOUT_MVOL_F|SOUT_SVOL_F|SOUT_VFOS_F|SOUT_VFOM_F;
 	return;
 }
 
@@ -845,7 +904,8 @@ void  update_radio_all(void){
 //-----------------------------------------------------------------------------
 void  force_push_radio(void){
 
-	sout_flags |= SOUT_VUPD_F;
+//	sout_flags |= SOUT_VUPD_F;
+	sout_flags |= (SOUT_MSQU_F | SOUT_SSQU_F | SOUT_MVOL_F | SOUT_SVOL_F | SOUT_VUPD_F | SOUT_VFOS_F | SOUT_VFOM_F);
 	return;
 }
 
@@ -1102,7 +1162,6 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
 #define SOUT_BAND	0x00400000L
 #define SOUT_PTT	0x00200000L	// band unit PTT
 */
-
     band_idr = get_bandid(vfo_p[bid].vfo / 1000L);		// use vfo frequency to determine band ID
     ux_noptt = band_idr << 27;							// align band ID in SOUT proto word
     if(is_main){
@@ -1132,6 +1191,12 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
     }else{
     	vfotr = vfo_p[bid].vfo;							// no TX, no calc needed
     }
+	// !!!
+/*	char tgbuf[20];
+	sprintf(tgbuf,"frq: %d",vfotr); //!!!
+	putsQ(tgbuf);
+*/
+    //
     if(is_tx) sout_flags |= SOUT_TONE_F;				// trigger tone update if TX
     //
     // use calculated band_id to dispatch to module specific PLL calculations
@@ -1212,7 +1277,7 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
         break;
 
     case ID1200:
-        pll = (vfotr - BASE_RX_1200) / 10L;			// convert to 10KHz chan
+        pll = (vfotr - BASE_RX_1200) / 10L;				// convert to 10KHz chan
         pll += PLL_1200;							    // add base PLL bitmap
         if (is_tx) {
             pll += BASE_TX_1200;					    // add tx offset
@@ -1239,6 +1304,7 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
         }else{
             pllptr[i] = UX_XIT | (ux129_rit & (REG_XIT_UP | REG_XIT_CNT));
        }
+        pllptr[i] = 0xffffffff;							// set end of PLL update string
        break;
 
     default:											// error trap, set end of update string
@@ -1689,9 +1755,11 @@ U8 set_next_band(U8 focus){
 		if(focus == MAIN){									// j is focused band, k is other band
 			k = set_bit(bandid_s);							// get sub-band bitmap
 			j = set_bit(bandid_m);							// get main-band bitmap
+			bandoff_m = bandid_m + 1;
 		}else{
 			j = set_bit(bandid_s);							// get sub-band bitmap
 			k = set_bit(bandid_m);							// get main-band bitmap
+			bandoff_s = bandid_s + 1;
 		}
 		i = k | j;
 		if(ux_present_flags & (~i)){						// check to see if there are at least 3 modules present
@@ -2046,6 +2114,17 @@ char* get_nameptr(U8 focus){
 
 	if(focus == MAIN) return memname[bandid_m];
 	else return memname[bandid_s];
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_bandnv() writes the band ids to NV ram
+//-----------------------------------------------------------------------------
+void set_bandnv(void){
+
+	rw8_nvr(BIDM_0, bandid_m, CS_WRITE|CS_OPEN);
+	rw8_nvr(BIDM_0, bandid_s, CS_WRITE|CS_CLOSE);
+	return;
 }
 
 // end radio.c

@@ -57,11 +57,11 @@ struct vfo_struct {
 #define	CALL_0		(MEM_0 + sizeof(U8))		// call-mem#
 #define	BFLAGS_0	(CALL_0 + sizeof(U8))		// expansion flags
 #define	SCANFLAGS_0	(BFLAGS_0 + sizeof(U8))		// scan (expansion) flags
-#define	TSA_0		(SCANFLAGS_0 + sizeof(U8))		// frq step "A"
+#define	TSA_0		(SCANFLAGS_0 + sizeof(U8))	// frq step "A"
 #define	TSB_0		(TSA_0 + sizeof(U8))		// frq step "B"
 
 #define	VFO_LEN		((TSB_0 + sizeof(U8)) - VFO_0)
-#define	XIT_0		((VFO_LEN * NUM_VFOS) + VFO_0)		// xit reg
+#define	XIT_0		((VFO_LEN * NUM_VFOS) + VFO_0) // xit reg
 #define	RIT_0		(XIT_0 + sizeof(U8))		// rit reg
 #define	BIDM_0		(RIT_0 + sizeof(U8))		// bandidm reg
 #define	BIDS_0		(BIDM_0 + sizeof(U8))		// bandids reg
@@ -165,9 +165,9 @@ struct vfo_struct {
 // Global Fns
 //-----------------------------------------------------------------------------
 
-U32 init_radio(void);
+void init_radio(void);
 void process_SIN(U8 cmd);
-void process_SOUT(U8 cmd);
+U8 process_SOUT(U8 cmd);
 void  save_vfo(U8 b_id);
 void  recall_vfo(void);
 //U16 crc_vfo(void);
@@ -224,3 +224,4 @@ void copy_vfo2temp(U8 focus);
 void copy_temp2vfo(U8 focus);
 void save_mc(U8 focus);
 char* get_nameptr(U8 focus);
+void set_bandnv(void);
