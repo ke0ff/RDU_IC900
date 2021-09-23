@@ -250,15 +250,21 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 
 				case info:														// info + version
 					putsQ("SYSINFO:");
-					sprintf(obuf,"LIM_END = %d",LIM_END);
+					sprintf(obuf,"LIM_END = %d", LIM_END);
 					putsQ(obuf);
-					sprintf(obuf,"MEM_LEN = %d",MEM_LEN);
+					sprintf(obuf,"MEM_LEN = %d", MEM_LEN);
 					putsQ(obuf);
-					sprintf(obuf,"NUM_MEMS = %d",NUM_MEMS);
+					sprintf(obuf,"NUM_MEMS = %d", NUM_MEMS);
 					putsQ(obuf);
-					sprintf(obuf,"Last NVRAM = %d (0x%04x)",MEM_END,MEM_END);
+					sprintf(obuf,"Last NVRAM = %d (0x%04x)", MEM_END,MEM_END);
 					putsQ(obuf);
-					sprintf(obuf,"NVREV = 0x%04x",nvram_sn());
+					sprintf(obuf,"NVREV = 0x%04x", nvram_sn());
+					putsQ(obuf);
+					sprintf(obuf,"VFO_0 = %d", VFO_0);
+					putsQ(obuf);
+					sprintf(obuf,"VFO_LEN = %d", VFO_LEN);
+					putsQ(obuf);
+					sprintf(obuf,"SQ_0 = %d", SQ_0);
 					putsQ(obuf);
 				case vers:														// SW VERSION CMD
 					dispSWvers();

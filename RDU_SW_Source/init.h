@@ -159,7 +159,7 @@
 #define	PORTC_PURV		(DIAL_UP|DIAL_DN)
 #define	PORTC_DIAL		(DIAL_UP|DIAL_DN)
 #define	PORTC_INIT		(0)
-#define	DIAL_DEBOUNCE	50			// 25 ms dial debounce
+#define	DIAL_DEBOUNCE	75			// 75 ms dial debounce
 
 // Port D defines
 #define SCK				0x01		// out		ssi3clk, LCD coms

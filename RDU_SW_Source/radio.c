@@ -292,11 +292,17 @@ void init_radio(void){
 	putsQ("Validate selected module...");				// display status msg to console
 	// double-check band-ids for validity against installed hardware
 	if(bandid_m != BAND_ERROR){
-		if(!(set_bit(bandid_m) & ux_present_flags)) bandid_m = BAND_ERROR;			// set main invalid if not present
-//		bandid_s = BAND_ERROR);														// if main invalid, so is sub (will get reassigned below)
+		if(!(set_bit(bandid_m) & ux_present_flags)){
+			bandid_m = BAND_ERROR;						// set main invalid if not present
+			putsQ("!Merror!");							// display status msg to console
+		}
+//		bandid_s = BAND_ERROR);							// if main invalid, so is sub (will get reassigned below)
 	}else{
 		if(bandid_s != BAND_ERROR){
-			if(!(set_bit(bandid_s) & ux_present_flags)) bandid_s = BAND_ERROR;		// set sub invalid if not present
+			if(!(set_bit(bandid_s) & ux_present_flags)){
+				bandid_s = BAND_ERROR;					// set sub invalid if not present
+				putsQ("!Serror!");						// display status msg to console
+			}
 		}
 	}
 	// re-assign active module if error
@@ -318,7 +324,10 @@ void init_radio(void){
 	// if main band is error, copy up sub-band
 	if(bandid_m == BAND_ERROR){
 		bandid_m = bandid_s;
-		bandid_s = BAND_ERROR;
+		if(bandid_s != BAND_ERROR){
+			bandid_s = BAND_ERROR;
+			putsQ("!Serror!");							// display status msg to console
+		}
 	}
 
 //		bandid_m = ID2M_IDX;	//!!! need to choose lowest 2 present modules
@@ -469,8 +478,8 @@ U8 process_SOUT(U8 cmd){
 					setpll(bandid_m, pll_buf, i, MAIN);										// PTT only drives MAIN band, set the module for TX
 					set_vfo_display(VMODE_ISTX | MAIN);
 					pll_ptr = 0;															// enable data send
-					sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
-					putsQ(dgbuf);
+//					sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
+//					putsQ(dgbuf);
 					sin_flags &= ~SIN_SEND_F;												// clear the signal
 					k = 0xff;															// processing...
 				}else{
@@ -565,7 +574,7 @@ U8 process_SOUT(U8 cmd){
 				// send buffer, 1 word/pass
 				if((pll_buf[pll_ptr] & 0xfffffff0) != 0xfffffff0){						// (almost) all "f's" is end of buffer semaphore
 					if((pll_buf[pll_ptr] & UX_XIT_MASK) != UX_XIT){						// process non-xit/rit messages
-						putsQ("so1");	// !!!debug
+//						putsQ("so1");	// !!!debug
 						send_so(pll_buf[pll_ptr++]);									// send next word
 						sout_time(SOUT_PACE_TIME);
 						if(pll_ptr >= PLL_BUF_MAX){										// check for hard-end-of-buffer
@@ -983,70 +992,74 @@ U8 adjust_squ(U8 mainsub, S8 value){
 	S8	i;		// temp
 	U8	j;		// return value
 
-	if((value & 0xC0) == 0x80){							// set value branch
-		i = value & 0x3f;								// mask flags
+	if((value & 0xC0) == 0x80){											// set value branch
+		i = value & 0x3f;												// mask flags
 		if(i > LEVEL_MAX) i = LEVEL_MAX;
 		if(mainsub){
-			vfo_p[bandid_m].sq = i;							// store main
+			vfo_p[bandid_m].sq = i;										// store main
 			j = vfo_p[bandid_m].sq;
-			sout_flags |= SOUT_MSQU_F;					// send signal to update B-unit
+			sout_flags |= SOUT_MSQU_F;									// send signal to update B-unit
 		}else{
-			vfo_p[bandid_s].sq = i;							// store sub
+			vfo_p[bandid_s].sq = i;										// store sub
 			j = vfo_p[bandid_s].sq;
-			sout_flags |= SOUT_SSQU_F;					// send signal to update B-unit
+			sout_flags |= SOUT_SSQU_F;									// send signal to update B-unit
 		}
 	}else{
-		i = value;										// +/- branch
+		i = value;														// +/- branch
 		if(mainsub){
-			vfo_p[bandid_m].sq += i;							// adjust main +/-
+			vfo_p[bandid_m].sq += i;									// adjust main +/-
 			if(vfo_p[bandid_m].sq > 0x7f) vfo_p[bandid_m].sq = 0;
 			if(vfo_p[bandid_m].sq > LEVEL_MAX) vfo_p[bandid_m].sq = LEVEL_MAX;
 			j = vfo_p[bandid_m].sq;
-			if(value != 0) sout_flags |= SOUT_MSQU_F;	// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_MSQU_F;					// send signal to update B-unit
 		}else{
-			vfo_p[bandid_s].sq += i;							// adjust sub +/-
+			vfo_p[bandid_s].sq += i;									// adjust sub +/-
 			if(vfo_p[bandid_s].sq > 0x7f) vfo_p[bandid_s].sq = 0;
 			if(vfo_p[bandid_s].sq > LEVEL_MAX) vfo_p[bandid_s].sq = LEVEL_MAX;
 			j = vfo_p[bandid_s].sq;
-			if(value != 0) sout_flags |= SOUT_SSQU_F;	// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_SSQU_F;					// send signal to update B-unit
 		}
 	}
-	return j;											// return current value
+	if(mainsub == MAIN) set_qvnv(MAIN);									// store to NVRAM
+	else set_qvnv(SUB);
+	return j;															// return current value
 }
 
 U8 adjust_vol(U8 mainsub, S8 value){
 	S8	i;		// temp
 	U8	j;		// return value
 
-	if((value & 0xC0) == 0x80){							// set value branch
-		i = value & 0x3f;								// mask flags
+	if((value & 0xC0) == 0x80){											// set value branch
+		i = value & 0x3f;												// mask flags
 		if(i > LEVEL_MAX) i = LEVEL_MAX;
 		if(mainsub){
-			vfo_p[bandid_m].vol = i;							// store main
+			vfo_p[bandid_m].vol = i;									// store main
 			j = vfo_p[bandid_m].vol;
-			sout_flags |= SOUT_MVOL_F;					// send signal to update B-unit
+			sout_flags |= SOUT_MVOL_F;									// send signal to update B-unit
 		}else{
-			vfo_p[bandid_s].vol = i;							// store sub
+			vfo_p[bandid_s].vol = i;									// store sub
 			j = vfo_p[bandid_s].vol;
-			sout_flags |= SOUT_SVOL_F;					// send signal to update B-unit
+			sout_flags |= SOUT_SVOL_F;									// send signal to update B-unit
 		}
 	}else{
-		i = value;										// +/- branch
+		i = value;														// +/- branch
 		if(mainsub){
-			vfo_p[bandid_m].vol += i;							// adjust main +/-
+			vfo_p[bandid_m].vol += i;									// adjust main +/-
 			if(vfo_p[bandid_m].vol > 0x7f) vfo_p[bandid_m].vol = 0;
 			if(vfo_p[bandid_m].vol > LEVEL_MAX) vfo_p[bandid_m].vol = LEVEL_MAX;
 			j = vfo_p[bandid_m].vol;
-			if(value != 0) sout_flags |= SOUT_MVOL_F;	// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_MVOL_F;					// send signal to update B-unit
 		}else{
-			vfo_p[bandid_s].vol += i;							// adjust sub +/-
+			vfo_p[bandid_s].vol += i;									// adjust sub +/-
 			if(vfo_p[bandid_s].vol > 0x7f) vfo_p[bandid_s].vol = 0;
 			if(vfo_p[bandid_s].vol > LEVEL_MAX) vfo_p[bandid_s].vol = LEVEL_MAX;
 			j = vfo_p[bandid_s].vol;
-			if(value != 0) sout_flags |= SOUT_SVOL_F;	// send signal to update B-unit
+			if(value != 0) sout_flags |= SOUT_SVOL_F;					// send signal to update B-unit
 		}
 	}
-	return j;											// return current value
+	if(mainsub == MAIN) set_qvnv(MAIN);									// store to NVRAM
+	else set_qvnv(SUB);
+	return j;															// return current value
 }
 
 //-----------------------------------------------------------------------------
@@ -1059,41 +1072,43 @@ U8 adjust_tone(U8 mainsub, S8 value){
 	U8	j;		// return value
 	U8	k;		// temp
 
-	if((value & 0xC0) == 0x80){									// set value branch
-		i = value & 0x3f;										// mask flags
+	if((value & 0xC0) == 0x80){											// set value branch
+		i = value & 0x3f;												// mask flags
 		if(i > TONE_MAX) i = TONE_MAX;
 		if(mainsub){
-			k = vfo_p[bandid_m].ctcss & (~CTCSS_MASK);				// mask control bits
-			vfo_p[bandid_m].ctcss = i | k;							// store main
+			k = vfo_p[bandid_m].ctcss & (~CTCSS_MASK);					// mask control bits
+			vfo_p[bandid_m].ctcss = i | k;								// store main
 			j = vfo_p[bandid_m].ctcss;
-			sout_flags |= SOUT_TONE_F;							// send signal to update B-unit
+			sout_flags |= SOUT_TONE_F;									// send signal to update B-unit
 		}else{
-			k = vfo_p[bandid_s].ctcss & (~CTCSS_MASK);				// mask control bits
-			vfo_p[bandid_s].ctcss = i | k;							// store sub
+			k = vfo_p[bandid_s].ctcss & (~CTCSS_MASK);					// mask control bits
+			vfo_p[bandid_s].ctcss = i | k;								// store sub
 			j = vfo_p[bandid_s].ctcss;
-//			sout_flags |= SOUT_TONE_F;							// send signal to update B-unit
+//			sout_flags |= SOUT_TONE_F;									// send signal to update B-unit
 		}
 	}else{
-		i = value;												// +/- branch
+		i = value;														// +/- branch
 		if(mainsub){
 			k = vfo_p[bandid_m].ctcss & CTCSS_MASK;
 			k += i;
-			if(k > TONE_MAX) k = 1;								// wrap-around
+			if(k > TONE_MAX) k = 1;										// wrap-around
 			if((k > CTCSS_MASK) || (k == 0)) k = TONE_MAX;
 			j = (vfo_p[bandid_m].ctcss & (~CTCSS_MASK)) | k;			// adjust main +/-
 			vfo_p[bandid_m].ctcss = j;
-			if(!value) sout_flags |= SOUT_TONE_F;				// send signal to update B-unit
+			if(!value) sout_flags |= SOUT_TONE_F;						// send signal to update B-unit
 		}else{
 			k = vfo_p[bandid_s].ctcss & CTCSS_MASK;
 			k += i;
-			if(k > TONE_MAX) k = 1;								// wrap-around
+			if(k > TONE_MAX) k = 1;										// wrap-around
 			if((k > CTCSS_MASK) || (k == 0)) k = TONE_MAX;
 			j = (vfo_p[bandid_s].ctcss & (~CTCSS_MASK)) | k;			// adjust sub +/-
 			vfo_p[bandid_s].ctcss = j;
-			if(!value) sout_flags |= SOUT_TONE_F;				// send signal to update B-unit
+			if(!value) sout_flags |= SOUT_TONE_F;						// send signal to update B-unit
 		}
 	}
-	return j;													// return current value
+	if(mainsub == MAIN) set_tonenv(MAIN);								// store to NVRAM
+	else set_tonenv(SUB);
+	return j;															// return current value
 }
 
 //-----------------------------------------------------------------------------
@@ -1104,7 +1119,7 @@ U8 adjust_tone(U8 mainsub, S8 value){
 U8 adjust_toneon(U8 mainsub, U8 value){
 	U8	j;
 
-	if(value == 0xff){									// read setting
+	if(value == 0xff){													// read setting
 		if(mainsub){
 			if(vfo_p[bandid_m].ctcss & CTCSS_OFF) j = 0;
 			else j = 1;
@@ -1115,22 +1130,24 @@ U8 adjust_toneon(U8 mainsub, U8 value){
 	}else{
 		if(mainsub){
 			if(value){
-				vfo_p[bandid_m].ctcss &= ~CTCSS_OFF;			// turn on
+				vfo_p[bandid_m].ctcss &= ~CTCSS_OFF;					// turn on
 			}else{
-				vfo_p[bandid_m].ctcss |= CTCSS_OFF;			// turn off
+				vfo_p[bandid_m].ctcss |= CTCSS_OFF;						// turn off
 			}
-			sout_flags |= SOUT_TONE_F;					// send signal to update B-unit
+			sout_flags |= SOUT_TONE_F;									// send signal to update B-unit
 		}else{
 			if(value){
-				vfo_p[bandid_s].ctcss &= ~CTCSS_OFF;			// turn on
+				vfo_p[bandid_s].ctcss &= ~CTCSS_OFF;					// turn on
 			}else{
-				vfo_p[bandid_s].ctcss |= CTCSS_OFF;			// turn off
+				vfo_p[bandid_s].ctcss |= CTCSS_OFF;						// turn off
 			}
-//			sout_flags |= SOUT_TONE_F;					// send signal to update B-unit
+//			sout_flags |= SOUT_TONE_F;									// send signal to update B-unit
 		}
 		j = value;
 	}
-	return j;											// return current value
+	if(mainsub == MAIN) set_tonenv(MAIN);								// store to NVRAM
+	else set_tonenv(SUB);
+	return j;															// return current value
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2124,6 +2141,35 @@ void set_bandnv(void){
 
 	rw8_nvr(BIDM_0, bandid_m, CS_WRITE|CS_OPEN);
 	rw8_nvr(BIDM_0, bandid_s, CS_WRITE|CS_CLOSE);
+	return;
+}
+
+// end radio.c
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_qv() writes the vol/squ to NV ram
+//-----------------------------------------------------------------------------
+void set_qvnv(U8 focus){
+	U8	i;		// temp
+
+	if(focus == MAIN) i = bandid_m;
+	else i = bandid_s;
+	rw8_nvr(SQ_0+((VFO_LEN * (U32)i) + VFO_0), vfo_p[i].sq, CS_WRITE|CS_OPEN);
+	rw8_nvr(VOL_0, vfo_p[i].vol, CS_WRITE|CS_CLOSE);
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_tonenv() writes the ctcss value to NV ram
+//-----------------------------------------------------------------------------
+void set_tonenv(U8 focus){
+	U8	i;		// temp
+
+	if(focus == MAIN) i = bandid_m;
+	else i = bandid_s;
+	rw8_nvr(CTCSS_0+((VFO_LEN * (U32)i) + VFO_0), vfo_p[i].ctcss, CS_WRITE|CS_OPENCLOSE);
 	return;
 }
 

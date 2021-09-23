@@ -225,3 +225,5 @@ void copy_temp2vfo(U8 focus);
 void save_mc(U8 focus);
 char* get_nameptr(U8 focus);
 void set_bandnv(void);
+void set_qvnv(U8 focus);
+void set_tonenv(U8 focus);

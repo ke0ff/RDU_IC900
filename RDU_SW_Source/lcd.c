@@ -702,8 +702,8 @@ U8 process_MS(U8 mode){
 				mmute_action(&mute_mode);
 				if(!(mute_mode & SUB_MUTE)){
 					smute_action(&mute_mode);
-					b = 2;	// 2beeps
 				}
+				b = 2;	// 2beeps
 				break;
 
 			case SMUTEchr:												// SMUTE initial press toggles mute of sub-band audio (unmutes main if previously muted)

@@ -13,8 +13,10 @@
 /********************************************************************
  *  Project scope rev notes:
  *    				 To-do Checklist time!
+ *    				 !!! Need to think about vol management.  It is confusing even though it works as intended.  Is this really what we want???
+ *
  *    				 !!! there is a noticable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
- *    				 * need to implement system warning messages on LCD and serial ports.
+ *
  *    				 * test band switching (VFO button)
  *    				 * SET loop:
  *    				 	- DIM brightness setting, LCD and button
@@ -24,6 +26,9 @@
  *
  *
  *    Project scope rev History:
+ *    09-22-21 jmh:	 Tweaks to vol/sq/ctcss nv save process.
+ *    09-21-21 jmh:	 Increased dial debounce to 75 ms (was 50).
+ *    				 Tweaks to set_pwm and SMUTEchr_H.
  *    09-20-21 jmh:	 Continued >2 module debug.  Chased issue where mem/call IPL recall wasn't working.  Looks to be fixed.
  *    				 Revamped IPL init code to more closely follow original IC-900 flow.
  *    				 Fixed problem with UX129 PLL code: wasn't storing end of buffer semaphore.
@@ -122,37 +127,7 @@
  *    					appear to be shorted in the hardware, need to confirm/fix}. Added prescale loop to
  *    					keyscan ISR to allow COL to settle longer before gathering inputs.
  *    08-05-21 jmh:	 Edits for RDU application...  Moved QEI code to "encoder.c"
- *    03-23-19 jmh:  Added timer1a as serial pacing timer for UART1.  Runs at 10KHz, giving an extra
- *    					2 stop bits to serial outputs from UART1.
- *    03-12-19 jmh:  Debugged HM-133 support.  Had to increase min bit time from 200 to 220 to get
- *    					both the HM151 and HM133 to function.
- *    03-07-19 jmh:  Added HM-133 support.  DTMF, func, and PTT bits in character stream are
- *    					trapped and the keycode outputs modified (DTMF has hi-bit set, Fn mode
- *    					uses all lower-case characters).  Added comments to arrays and Fns.
- *						Also added "PTT" code, ";" support.
- *    03-03-19 jmh:  Changed "s" commands to removed accesses to IC7K data control. Must now use
- *						"d" command separately to set data status.
- *					 Cleaned up comments for HMic keypad.
- *    12-29-16 jmh:  fixed bug in keypad that would trap a double keypress and try to send a NULL to
- *    				 	the ACU.
- *    12-28-16 jmh:  Added LED control logic.
- *    				 re-worked RESP LED to use a sequence table.  RESP LED responds to i5xx commands
- *    				 	to set level, but not to master level.  All other LEDs are controlled by
- *    				 	the LED and master levels.  L5x will turn resp LED on or off.
- *    				 re-worked ccmds to increase syntax error reporting.
- *    				 re-worked getch00 to allow it to trap swcmd == SW_ESC signal and return to main()
- *    				 	to allow warm-reset to be processed (restarts main()).
- *    				 Added free-running timer read to ccmd list.
- *    				 debugged ACU loop time ccmd and POR init.
- *    				 fixed bug in keypad that would trap a double keypress and try to send a NULL to
- *    				 	the ACU.
- *    12-26-16 jmh:  Updated keypad matrix LUT to include CW paddle buttons (left, right, and PB)
- *    					"{", "}", and "^" are the characters sent for these buttons.
- *    				 Added PTT repeat logic for PTTb and PTT7K.
- *    				 Added ccmd support for mic switches and HM151 data switch.
- *    				 Fixed HM151 data capture to ignore data if IC7K is the mic switch load.
- *    				 Fixed HM151 key capture: was not sending ";" terminator until next keypress.
- *    09-20-16 jmh:  creation date
+ *    08-04-21 jmh:  creation date
  *    				 <VERSION 0.0>
  *
  *******************************************************************/
@@ -178,22 +153,22 @@
 //
 //		Discrete keys/switches are captured with an edge detect flag processed inside the timer2 loop.
 //
-//	SPI3 (PD0 = SCLK, PD3 = MOSI) sends data to the LCD controllers.  GPIOs are used for the handshake
+//	bbSSI (PD0 = SCLK, PD3 = MOSI) bit-bang SSI: sends data to the LCD controllers.  GPIOs are used for the handshake
 //		signals.
 //
 //  Interrupt Resource Map:
-//	*	Timer0A			PF0:		SW gated 1KHz pulse output to drive piezo spkr (uses PWM and ISR to generate and gate off the beep)
-//	*	Timer1A			--			serial pacing timer
+//	*	Timer0A			PF0:		ISR SW gated 1KHz pulse output to drive piezo spkr (uses PWM and ISR to generate and gate off the beep)
+//	*	Timer1A			--			ISR serial pacing timer
+//	*	Timer1B			--			ISR bit-bang SSI bit-rate timer
 //	*	SSI1			PF1:		ASO async output (4800 baud, 1 start, 30 bit + 1 stop (plus an implied stop bit)
-//		Timer2A			PF4:		isr ASI async input (4800 baud, 1 start, ... )
+//		Timer2A			PF4:		ISR ASI async input (4800 baud, 1 start, ... )
 //		GPIO FE			PF4:		ISR (detects ASI start bit, starts Timer2A)
-//	*	UART0 			PA[1:0]:	Bluetooth serial port
-//		UART1			PB[1:0]:	PGM command port (TTL to RS232 to PC)
+//	*	UART0 			PA[1:0]:	ISR(RX) Bluetooth serial port
+//		UART1			PB[1:0]:	ISR(RX) PGM command port (TTL to external RS232 to PC)
 //	*	M1PWM (6&7)		PF2, PF3:	LED PWMs (PF3 = backlight, PF2 = all other LEDs)
-//		GPIO edge		PC[6:5]:	Main dial (up/dn type), edge intrpts to count encoder pulses
-//		SSI3			PD0, PD3:	LCD command/data comms.  Uses PD1, PD6, PE0, PE1, & PB7
-//	*	Timer3A			--			Application timers & keyscan
-//		Timer3B			--			debounce timer (dial and keys)
+//		GPIO edge		PC[6:5]:	ISR Main dial (up/dn type), edge intrpts to count encoder pulses (debounce in Timer3A ISR)
+//		bbSSI			PD0, PD3:	LCD command/data comms.  Uses PD1, PD6, PE0, PE1, & PB7 (SSI3 can no longer be used due to GPIO constraints for MISO)
+//	*	Timer3A			--			ISR Application timers & keyscan
 //		ADC0			PD2:		Ambient light sensor
 //
 //		QEI1			(future) @PC[6:5]: Main dial
@@ -201,8 +176,6 @@
 //
 //  I/O Resource Map:
 //      See "init.h"
-//
-//	SW: Basic functions:
 //
 //-----------------------------------------------------------------------------
 
@@ -407,12 +380,12 @@ int main(void){
 //    	GPIO_PORTD_DATA_R &= ~PTTb;						// set PTTb in-active
     	while(gotchrQ()) getchrQ();						// clear serial input in case there was some POR garbage
     	gets_tab(buf, rebufN, GETS_INIT);				// initialize gets_tab()
-        set_pwm(0, 100);								// master = 100%
         set_led(0xff, 0x00);							// init LED levels
-        set_led(5, 1);									// enable LEDs at 30% until the OS takes over
-        set_pwm(5, 30);
+        set_pwm(0, 99);								// master = 100%
+        set_led(5, 1);									// enable LEDs at 10% until the OS takes over
+        set_pwm(5, 10);
         set_led(6, 1);
-        set_pwm(6, 30);
+        set_pwm(6, 10);
     	process_IO(0xff);								// init process_io
     	// GPIO init
     	//...
@@ -776,7 +749,7 @@ void set_led(U8 lednum, U8 value){
 		led_4_level = 50;*/
 		led_5_level = 22;
 		led_6_level = 99;
-		pwm_master = 99;					// led master level
+		pwm_master = 100;					// led master level
 		// led pwm regs
 /*		pwm2_reg = (U16)(PWM_ZERO - ((PWM_ZERO - PWM_MAX) * 24L / 100L) - 1L);
 		pwm3_reg = (U16)(PWM_ZERO - ((PWM_ZERO - PWM_MAX) * 16L / 100L) - 1L);
@@ -1394,7 +1367,7 @@ void do_3beep(void){
 
 //-----------------------------------------------------------------------------
 // gpiod_isr
-// GPIO_PORTC isr, processes the rotary encoder for MAIN
+// GPIO_PORTC isr, processes the rotary encoder dial for MAIN
 //		Simple up-dn counter pulses (not a dual-phase encoder).
 //		!! need to flip-flop through a timer delay  ISR to debounce !!
 //-----------------------------------------------------------------------------
