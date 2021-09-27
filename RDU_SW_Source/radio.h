@@ -102,18 +102,35 @@ struct vfo_struct {
 #define	DPLX_MASK		(DPLX_P | DPLX_M)	// field mask
 #define	LOHI_F			0x04				// low power if == 1
 #define	TSA_F			0x08				// use TSA if == 1
-//#define	MEMODE_F		0x10				// memory mode active if == 1
+#define	SCANEN_F		0x10				// mem scan enable flag ("S"kip = on if zero)
 
 #define	XIT_REG			0x0f				// xit register (0x08 is dir, 0x07 is count)
 
 #define	SIN_ACTIVITY	200		// SIN activity timeout
 
+// update_radio_all ordinal defines
+#define	UPDATE_ALL		1
+#define	MAIN_ALL		2
+#define	SUB_ALL			3
+#define	MAIN_FREQ		4
+#define	SUB_FREQ		5
+#define	MAIN_VQ			6
+#define	SUB_VQ			7
+
+// PTT mem defines
+#define	NO_PTT			0
+#define	PTT_KEYED		1
+#define	PTT_EDGE		0x80
+
 // SIN activity flag bits
-#define SIN_SQS_F		((SIN_SQSA|SIN_SQSB) >> 16)	// COS
+#define SIN_SQSM_F		((SIN_SQSA) >> 16)			// COS main
+#define SIN_SQSS_F		((SIN_SQSB) >> 16)			// COS sub
 #define SIN_MSRF_F		(SIN_SRFA >> 16)			// SRF main
 #define SIN_SSRF_F		(SIN_SRFB >> 16)			// SRF sub
 #define SIN_SEND_F		SIN_SEND					// PTT
 #define SIN_DSQ_F		(SIN_DSQA|SIN_DSQB)			// tone detected
+#define SIN_DSQA_F		(SIN_DSQA)					// tone detected
+#define SIN_DSQB_F		(SIN_DSQB)					// tone detected
 #define SIN_MCK_F		(SIN_MCK)					// MIC u/d button change
 #define SIN_SEL_F		(SIN_SEL11|SIN_SEL12|SIN_SEL21|SIN_SEL22)	// OPT
 #define	SIN_VFOM_F		0x00010000L					// vfo change flag
@@ -152,7 +169,8 @@ struct vfo_struct {
 #define	MIC_DB_TIME		20			// mic u/d button debounce wait period
 #define	MUTE_TIME		250			// volume mute delay for band swaps
 #define	TSW_TIME		SEC10		// TS adj timeout
-#define	SLIDE_TIME		SEC300MS	// text slider display rate shift rate
+#define	SLIDE_TIME		SEC300MS	// text slider display shift rate
+#define	SCAN_TIME		SEC400MS	// scan channel rate
 
 // set/read_tsab():
 #define	TSA_SEL			1			// selects TSA
@@ -196,7 +214,7 @@ U8 read_tsab(U8 main, U8 absel);
 void set_tsab(U8 main, U8 absel, U8 value);
 void set_ab(U8 main, U8 tf);
 S32 set_mhz_step(S32 sval);
-S8 is_mic_updn(U8 ipl);
+S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq);
 U32 get_freq(U8 main);
 void copy_vfot(U8 main);
 void temp_vfo(U8 main);
@@ -208,7 +226,7 @@ U8 get_callnum(U8 main, U8 adder);
 U8 get_bit(U8 value);
 U8 set_bit(U8 value);
 U8 bit_set(U8 value);
-void  update_radio_all(void);
+void  update_radio_all(U8 vector);
 void set_offs(U8 focus, U16 value);
 U16 get_offs(U8 focus);
 U8 inv_duplex(U8 focus);
@@ -225,5 +243,8 @@ void copy_temp2vfo(U8 focus);
 void save_mc(U8 focus);
 char* get_nameptr(U8 focus);
 void set_bandnv(void);
-void set_qvnv(U8 focus);
+void set_qnv(U8 focus);
+void set_vnv(U8 focus);
 void set_tonenv(U8 focus);
+U8 get_scanmem(U8 focus);
+U8 togg_scanmem(U8 focus);

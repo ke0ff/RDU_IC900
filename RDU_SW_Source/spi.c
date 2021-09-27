@@ -384,10 +384,10 @@ void rwusn_nvr(U8* dptr, U8 mode)
 
 void Timer1B_ISR(void){
 
-	// clear ISR flags
-	TIMER1_ICR_R = TIMER1_MIS_R & TIMER_MIS_BMASK;
 	// set flag to trigger bit
-	ssiflag = 1;
+	if(TIMER1_MIS_R & TIMER_MIS_TBTOMIS) ssiflag = 1;
+	// clear ISR flags
+	TIMER1_ICR_R = TIMER1_MIS_R & TIMERB_MIS_MASK;
 	return;
 }
 

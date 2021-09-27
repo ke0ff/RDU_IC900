@@ -49,6 +49,8 @@
 #define	OFFS_XFLAG		0x08		// offset display/edit active
 #define	TEXTM_SLIDE		0x10		// text slider display active flags (M/S)
 #define	TEXTS_SLIDE		0x20
+#define	MSCANM_XFLAG	0x40		// mem scan active flags (M/S)
+#define	MSCANS_XFLAG	0x80
 
 // XMODE flags
 #define	MEM_XFLAG		0x10
@@ -207,6 +209,7 @@ void smem(U8 mn);
 void mtonea(U8 tf);
 void mema(U8 focus, U8 tf);
 void stonea(U8 tf);
+void mskpa(U8 focus, U8 tf);
 void mdupa(char dplx);
 void sdupa(char dplx);
 void mdupa_blink(U8 tf);
@@ -234,3 +237,6 @@ void clear_xmode(void);
 void set_sys_err(U8 err);
 void clr_sys_err(U8 err);
 U8 puts_slide(U8 focus, char* sptr, U8 cmd);
+U8 doscan(U8 focus, U8 tf);
+U8 get_xmodeq(void);
+void set_ptt(U8 pttstat);

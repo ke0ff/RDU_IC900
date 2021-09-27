@@ -17,6 +17,7 @@
  *
  *******************************************************************/
 
+#include <stdio.h>
 #include <ctype.h>
 #include <math.h>
 #include "inc/tm4c123gh6pm.h"
@@ -30,11 +31,12 @@
 // local declarations
 //-----------------------------------------------------------------------------
 
+U32	sin_perr;
 U8	sin_error;
 U32	sin_mask;
 U8	sin_hptr;
 U8	sin_tptr;
-#define	SIN_MAX	5
+#define	SIN_MAX	8
 U32	sin_buf[SIN_MAX];
 U32	sin_dr;
 
@@ -53,6 +55,7 @@ U32 init_sio(void)
 
 	// init local variables
 	sin_error = 0;
+	sin_perr = 0;
 	sin_mask = 0;
 	sin_hptr = 0;
 	sin_tptr = 0;
@@ -186,6 +189,25 @@ void flush_sin(void){
 }
 
 //-----------------------------------------------------------------------------
+// get_error() returns framing error count
+//-----------------------------------------------------------------------------
+U32 get_error(void){
+
+	return sin_perr;
+}
+
+//-----------------------------------------------------------------------------
+// print_ptr() prints t/h ptrs
+//-----------------------------------------------------------------------------
+void print_ptr(void){
+	char dbuf[25];
+
+	sprintf(dbuf,"h%d,t%d", sin_hptr, sin_tptr);
+	putsQ(dbuf);
+	return;
+}
+
+//-----------------------------------------------------------------------------
 // gpiof_isr
 //-----------------------------------------------------------------------------
 //
@@ -222,30 +244,36 @@ void gpiof_isr(void){
 void Timer2A_ISR(void)
 {
 
-	TIMER2_ICR_R = TIMER2_MIS_R; //TIMER_ICR_CAECINT;						// clear intr
-	TIMER2_TAILR_R = (uint16_t)(SIN_BIT_TIME);
-	if(sin_mask == SIN_START){
-		if(GPIO_PORTF_DATA_R & SIN_TTL){
-			// framing error
-			TIMER2_CTL_R &= ~(TIMER_CTL_TAEN);				// disable timer
-			GPIO_PORTF_ICR_R = (SIN_TTL);					// clear int flags
-			GPIO_PORTF_IM_R |= (SIN_TTL);					// enable SIN edge intr
-			if(sin_error < 250) sin_error += 1;				// increment framing error count
+	if(sin_hptr >= SIN_MAX){
+		sin_hptr = 0;
+	}
+	if(TIMER2_MIS_R & TIMER_MIS_TATOMIS){
+		TIMER2_TAILR_R = (uint16_t)(SIN_BIT_TIME);
+		if(sin_mask == SIN_START){
+			if(GPIO_PORTF_DATA_R & SIN_TTL){
+				// framing error if data == 1 here
+				TIMER2_CTL_R &= ~(TIMER_CTL_TAEN);				// disable timer
+				GPIO_PORTF_ICR_R = (SIN_TTL);					// clear int flags
+				GPIO_PORTF_IM_R |= (SIN_TTL);					// enable SIN edge intr
+				if(sin_error < 250) sin_error += 1;				// increment framing error count
+			}else{
+				sin_mask >>= 1;									// signal start of data capture
+			}
 		}else{
-			sin_mask >>= 1;									// signal start of data capture
-		}
-	}else{
-		if(GPIO_PORTF_DATA_R & SIN_TTL){
-			sin_dr |= sin_mask;								// capture a 1
-		}
-		sin_mask >>= 1;
-		if(sin_mask == 0){
-			sin_buf[sin_hptr++] = sin_dr;
-			if(sin_hptr >= SIN_MAX) sin_hptr = 0;
-			TIMER2_CTL_R &= ~(TIMER_CTL_TAEN);				// disable timer
-			GPIO_PORTF_ICR_R = (SIN_TTL);					// clear int flags
-			GPIO_PORTF_IM_R |= (SIN_TTL);					// enable SIN edge intr
+			if(GPIO_PORTF_DATA_R & SIN_TTL){
+				sin_dr |= sin_mask;								// capture a 1
+			}
+			sin_mask >>= 1;
+			if(sin_mask == 0x8000L){
+				sin_buf[sin_hptr++] = sin_dr | 0xffffL;
+				if(sin_hptr >= SIN_MAX) sin_hptr = 0;
+				if(sin_hptr == sin_tptr) sin_perr++;
+				TIMER2_CTL_R &= ~(TIMER_CTL_TAEN);				// disable timer
+				GPIO_PORTF_ICR_R = (SIN_TTL);					// clear int flags
+				GPIO_PORTF_IM_R |= (SIN_TTL);					// enable SIN edge intr
+			}
 		}
 	}
+	TIMER2_ICR_R = TIMERA_MIS_MASK;								// clear all A-intr
 	return;
 }

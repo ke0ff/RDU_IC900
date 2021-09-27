@@ -56,7 +56,7 @@
 // SIN data word defines
 #define SIN_START	0x80000000L
 #define SIN_ADDR	0x40000000L
-#define SIN_STOP	0x0000fff0L	// mask - stop validate bits
+#define SIN_STOP	0x0000ffffL	// mask - stop validate bits
 //SIN_ADDR = 0
 #define SIN_BUSY	0x20000000L	// module selected feedback
 #define SIN_SQSA	0x10000000L	// main COS
@@ -86,6 +86,8 @@ void send_so(uint32_t data);
 U32 get_sin(void);
 char got_sin(void);
 void flush_sin(void);
+U32 get_error(void);
+void print_ptr(void);
 void gpiof_isr(void);
 void Timer2A_ISR(void);
 

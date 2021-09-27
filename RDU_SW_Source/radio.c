@@ -63,6 +63,7 @@ U32	sin_flags;							// bitmapped activity flags that signal changed data
 										// addr1 and 0 are muxed into a single 32 bit flag (only 16 bits of data are ever transferred)
 U8	sout_flags;							// signal for SOUT changes
 U8	ux_present_flags;					// bitmapped "present" (AKA, "installed") flags.
+U32	ptt_mem;							// PTT memory
 // **************************************************************
 // these data structures are mirrored in a SW shadow NVRAM (HIB RAM)
 //	each band module has its own cluster of data for frq, offset, etc...
@@ -98,6 +99,9 @@ U8	ux129_xit;							// XIT setting (UX-129) - 4-bit signed nybble (+7/-8)
 U8	ux129_rit;							// RIT setting (UX-129) - 4-bit signed nybble (+7/-8)
 U8	ux129_xit_t;						// temp
 U8	ux129_rit_t;
+
+U8	vol_m;								// main vol
+U8	vol_s;								// sub vol
 
 U8	bandid_m;							// bandid for main (index into above data structures)
 U8	bandid_s;							// bandid for sub (index into above data structures)
@@ -237,6 +241,8 @@ void init_radio(void){
 			vfo_tllim[i] = vfo_llim[i];
 			memname[i][0] = '\0';						// init mem names
 		}
+		vol_m = 20;										// vol setting
+		vol_s = 20;
 		vfo_p[ID10M_IDX].vfo = 29100L;					// each band has a unique initial freq
 		vfo_p[ID6M_IDX].vfo = 52525L;
 		vfo_p[ID2M_IDX].vfo = 146520L;
@@ -356,7 +362,7 @@ void init_radio(void){
 		}
 	}
 	force_push_radio();
-	update_radio_all();									// force radio update
+	update_radio_all(UPDATE_ALL);						// force radio update
 	i = 0;
 	while(i < 3){
 		if(process_SOUT(0) == 0){
@@ -377,51 +383,59 @@ void init_radio(void){
 void  process_SIN(U8 cmd){
 	U32	sin_data;
 	U32	ii;				// temp
+	U32 tt;
+	char	dbuf[35];	// !!! debug buff
+	static U32 lerr;
 
-	if(cmd == 0xff){								// initial program load (reset) branch
-		sin_time(SIN_ACTIVITY);						// start SIN activity timer
-		sin_addr0 = 0;								// pre-clear data and activity flags
+	if(cmd == 0xff){									// initial program load (reset) branch
+		sin_time(SIN_ACTIVITY);							// start SIN activity timer
+		sin_addr0 = 0;									// pre-clear data and activity flags
 		sin_addr1 = 0;
 		sin_flags = 0;
-		init_radio();								// init radio and data structures
-	}else{											// normal (run) branch
-		sin_data = get_sin();						// get'n check for SIN data
-		if((sin_data & SIN_STOP) == SIN_STOP){		// validate extended "stop" bits
-			sin_time(SIN_ACTIVITY);					// reset activity timer
-			clr_sys_err(NO_B_PRSNT);				// clear LOS error
-			if(sin_data & SIN_ADDR){				// process addr == 1 data
-				// ADDR 1
-				if(sin_data != sin_addr1){			// if data is new (different == new)
-					// process new addr1 data ... calculate change flags
-					ii = (sin_flags & 0x0000ffffL) | ((sin_data ^ sin_addr1) & SIN1_DATA);
-					sin_flags |= ii;
-/*					if(ii & SIN_SEND){
-						sin_flags |= SIN_SEND_F;
+		lerr = 10L;
+		init_radio();									// init radio and data structures
+		ptt_mem = 0x10L;
+	}else{												// normal (run) branch
+		if(got_sin()){
+			sin_data = get_sin();						// get'n check for SIN data
+			if((sin_data & SIN_STOP) == SIN_STOP){		// validate extended "stop" bits
+				sin_time(SIN_ACTIVITY);					// reset activity timer
+				clr_sys_err(NO_B_PRSNT);				// clear LOS error
+				if(sin_data & SIN_ADDR){				// process addr == 1 data
+					// ADDR 1
+					if(sin_data != sin_addr1){			// if data is new (different == new)
+						// process new addr1 data ... calculate change flags
+						ii = ((sin_data ^ sin_addr1) & SIN1_DATA) & 0xffff0000L;
+						sin_flags |= ii;
+						sin_addr1 = sin_data;			// store new data
 					}
-					if(ii & (SIN_DSQA | SIN_DSQB)) sin_flags |= SIN_DSQ_F;
-					if(ii & (SIN_MCK)) sin_flags |= SIN_MCK_F;
-					if(ii & (SIN_SEL11 | SIN_SEL12 | SIN_SEL21 | SIN_SEL22)) sin_flags |= SIN_SEL_F;*/
-					sin_addr1 = sin_data;			// store new data
+				}else{
+					// process ADDR == 0 data
+					if(sin_data != sin_addr0){			// if data is new (different == new)
+						// process new addr0 data ... calculate change flags
+						ii = (((sin_data ^ sin_addr0) & SIN0_DATA) >> 16) & 0x0000ffffL;
+						sin_flags |= ii;
+						sin_addr0 = sin_data;
+					}
 				}
 			}else{
-				// process ADDR == 0 data
-				if(sin_data != sin_addr0){			// if data is new (different == new)
-					// process new addr0 data ... calculate change flags
-					ii = (sin_flags & 0xffff0000L) | (((sin_data ^ sin_addr0) & SIN0_DATA) >> 16);
-					sin_flags |= ii;
-/*					if(ii & (SIN_SQSA | SIN_SQSB)) sin_flags |= SIN_SQS_F;
-					if(ii & (SIN_SRFA | SIN_SRFB)) sin_flags |= SIN_SRF_F;*/
-					sin_addr0 = sin_data;
-				}
-			}
-		}else{
-			// no (valid) data
-			if(!sin_time(0)){
-				sin_flags |= SIN_SINACTO_F;			// set timeout error if activity timer expires
-													// !!! need to trap this condition and post an error message to LCD
-				set_sys_err(NO_B_PRSNT);
+				// no (valid) data
+				sprintf(dbuf,"0err = %d, data = 0x%08x", get_error(), sin_data);
+				putsQ(dbuf);
 			}
 		}
+		if(!sin_time(0)){
+			sin_flags |= SIN_SINACTO_F;					// set timeout error if activity timer expires
+														// !!! need to trap this condition and post an error message to LCD
+			set_sys_err(NO_B_PRSNT);
+		}
+		tt = get_error();
+		if(tt != lerr){
+			lerr = tt;
+			sprintf(dbuf,"0err = %d", tt);
+			putsQ(dbuf);
+		}
+//		print_ptr(); //!!!
 	}
 }
 
@@ -439,8 +453,9 @@ U8 process_SOUT(U8 cmd){
 			U8	k = 0;
 	static	U8	xit_count;		// used to mechanize UX-129 XIT/RIT adjustment sequences
 	static	U8	xit_dir;
+			U32 ii;
 			U32* pptr;			// pointer into SOUT buffer
-			char dgbuf[30];		// !!! debug sprintf/putsQ buffer
+//			char dgbuf[30];		// !!! debug sprintf/putsQ buffer
 
 	if(cmd == 0xff){								// initial program load (reset) branch
 		pll_ptr = 0xff;								// set index to "idle" state
@@ -457,119 +472,126 @@ U8 process_SOUT(U8 cmd){
 				pll_ptr = 0;
 				bandoff_m = 0;															// clear signal flag
 				pll_buf[j] = 0xffffffffL;
-				k = 0xff;															// processing...
+				k = 0xff;																// processing...
 			}
 			if(bandoff_s){																// turn-off band module flag trap, main
 				pll_buf[j++] = bandoff_s << 27;
 				pll_ptr = 0;
 				bandoff_s = 0;															// clear signal flag
 				pll_buf[j] = 0xffffffffL;
-				k = 0xff;															// processing...
+				k = 0xff;																// processing...
 			}
 			if(!j){
-				if(sin_flags & SIN_SEND_F){													// PTT change detected
-					if(sin_addr1 & SIN_SEND){
-						i = 1;																// determine new state of PTT
+				ii = sin_addr1 & SIN_SEND;
+				if(ii != ptt_mem) {														// PTT change detected
+					ptt_mem = ii;														// save change
+					if(ii){
+						i = 1;															// PTT is T
+						if(get_xmodeq() & MSCANM_XFLAG){
+							doscan(MAIN, 0);											// shut down scan
+							do_1beep();
+						}
 					}
 					else{
-						i = 0;
+						i = 0;															// PTT is RX
 					}
-					amtx(i^1);																// update TX LED
-					setpll(bandid_m, pll_buf, i, MAIN);										// PTT only drives MAIN band, set the module for TX
+					set_ptt(i);															// transfer to lcd.c
+					amtx(i^1);															// update TX LED
+					setpll(bandid_m, pll_buf, i, MAIN);									// PTT only drives MAIN band, set the module for TX
 					set_vfo_display(VMODE_ISTX | MAIN);
-					pll_ptr = 0;															// enable data send
+					pll_ptr = 0;														// enable data send
 //					sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
 //					putsQ(dgbuf);
-					sin_flags &= ~SIN_SEND_F;												// clear the signal
+					sin_flags &= ~SIN_SEND_F;											// clear the signal
 					k = 0xff;															// processing...
 				}else{
 					// process sout signals
-					if(sout_flags){															// if not zero, there are (bit-mapped) signals to process
-						pptr = pll_buf;														// preset sout buffer pointer
+					if(sout_flags){														// if not zero, there are (bit-mapped) signals to process
+						pptr = pll_buf;													// preset sout buffer pointer
 						// get an ordinal value for the highest priority signal
 						if(mute_time(0)){
-							i = get_bit(sout_flags & ~(SOUT_MVOL_F|SOUT_SVOL_F));			// if mute delay, mask off vol flags
+							i = get_bit(sout_flags & ~(SOUT_MVOL_F|SOUT_SVOL_F));		// if mute delay, mask off vol flags
 						}else{
 							i = get_bit(sout_flags);
 						}
-						switch(i){															// this will mechanize the various updates to process in order without collision
+						switch(i){														// this will mechanize the various updates to process in order without collision
 						case SOUT_VFOM_N:
-							if(sin_addr1 & SIN_SEND) i = 1;									// get current state of PTT
+							if(sin_addr1 & SIN_SEND) i = 1;								// get current state of PTT
 							else i = 0;
-							pptr = setpll(bandid_m, pll_buf, i, MAIN);						// update main pll
+							pptr = setpll(bandid_m, pll_buf, i, MAIN);					// update main pll
 							pll_ptr = 0;
-							sout_flags &= ~SOUT_VFOM_F;										// clear the signal
-							set_vfo_display(MAIN);											// send disp update signal
-							save_vfo(bandid_m);												// save affected VFO
+							sout_flags &= ~SOUT_VFOM_F;									// clear the signal
+							set_vfo_display(MAIN);										// send disp update signal
+							save_vfo(bandid_m);											// save affected VFO
 							break;
 
 						case SOUT_VFOS_N:
-							setpll(bandid_s, pptr, 0, SUB);									// update main pll
+							setpll(bandid_s, pptr, 0, SUB);								// update main pll
 							pll_ptr = 0;
 							sout_flags &= ~SOUT_VFOS_F;
-							set_vfo_display(SUB_D);											// send disp update signal
-							save_vfo(bandid_s);												// save affected VFO
+							set_vfo_display(SUB_D);										// send disp update signal
+							save_vfo(bandid_s);											// save affected VFO
 							break;
 
-						case SOUT_MVOL_N:													// process VOL/SQU triggers...
+						case SOUT_MVOL_N:												// process VOL/SQU triggers...
 							if((mute_band & MS_MUTE) || (bandid_m > ID1200_IDX)){
-								i = 0;														// 0 if muted
+								i = 0;													// 0 if muted
 							}else{
-								i = vfo_p[bandid_m].vol;
+								i = vol_m;
 							}
 							pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
 							pll_ptr = 0;
-							sout_flags &= ~SOUT_MVOL_F;										// clear signal flag
-							pll_buf[1] = 0xfffffffeL;										// set to confirm mute
+							sout_flags &= ~SOUT_MVOL_F;									// clear signal flag
+							pll_buf[1] = 0xfffffffeL;									// set to confirm mute
 							break;
 
 						case SOUT_SVOL_N:
 							if((mute_band & SUB_MUTE) || (bandid_s > ID1200_IDX)){
 								i = 0;
 							}else{
-								i = vfo_p[bandid_s].vol;
+								i = vol_s;
 							}
 							pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
 							pll_ptr = 0;
-							sout_flags &= ~SOUT_SVOL_F;										// clear signal flag
-							pll_buf[1] = 0xfffffffeL;										// set to confirm mute
+							sout_flags &= ~SOUT_SVOL_F;									// clear signal flag
+							pll_buf[1] = 0xfffffffeL;									// set to confirm mute
 							break;
 
 						case SOUT_MSQU_N:
 							pll_buf[0] = atten_calc(vfo_p[bandid_m].sq) | ATTEN_MAIN | SQU_ADDR;
 							pll_ptr = 0;
-							sout_flags &= ~SOUT_MSQU_F;										// clear signal flag
+							sout_flags &= ~SOUT_MSQU_F;									// clear signal flag
 							pll_buf[1] = 0xffffffffL;
 							break;
 
 						case SOUT_SSQU_N:
 							pll_buf[0] = atten_calc(vfo_p[bandid_s].sq) | ATTEN_SUB | SQU_ADDR;
 							pll_ptr = 0;
-							sout_flags &= ~SOUT_SSQU_F;										// clear signal flag
+							sout_flags &= ~SOUT_SSQU_F;									// clear signal flag
 							pll_buf[1] = 0xffffffffL;
 							break;
 
-						case SOUT_TONE_N:													// send tone message
+						case SOUT_TONE_N:												// send tone message
 							pll_buf[0] = (U32)vfo_p[bandid_m].ctcss | TONE_ADDR;
 							pll_ptr = 0;
 							pll_buf[1] = 0xffffffffL;
-							sout_flags &= ~SOUT_TONE_F;										// clear signal flag
+							sout_flags &= ~SOUT_TONE_F;									// clear signal flag
 							break;
 
 						default:
 						case SOUT_VUPD_N:
-							push_vfo();														// save VFO
+							push_vfo();													// save VFO
 							sout_flags &= ~SOUT_VUPD_F;
 							break;
 						}
-						if(pll_ptr == 0) k = 0xff;											// processing...
+						if(pll_ptr == 0) k = 0xff;										// processing...
 					}
 				}
 			}
 		}else{
 			// data is being sent branch ...
 			// wait for pacing timer
-			k = 0xff;																// set "processing" flag
+			k = 0xff;																	// set "processing" flag
 			if(!sout_time(0xff)){														// check for the pacing timer to expire
 				// send buffer, 1 word/pass
 				if((pll_buf[pll_ptr] & 0xfffffff0) != 0xfffffff0){						// (almost) all "f's" is end of buffer semaphore
@@ -584,11 +606,11 @@ U8 process_SOUT(U8 cmd){
 																						// mechanizing this reduces the 32bit buffer length needed to queue SOUT data
 						if(xit_count){													// if we are still counting:
 							if(xit_count & 0x01){
-								putsQ("so2");	// !!!debug
+								putsQ("x0");	// !!!debug
 								send_so(UX_XIT_CK0);									// alternate FE clk with..
 								sout_time(SOUT_PACE_TIME);
 							}else{
-								putsQ("so3");	// !!!debug
+								putsQ("x1");	// !!!debug
 								if(xit_dir) send_so(UX_XIT_CKUP);						// ...REF clk up,
 								else send_so(UX_XIT_CKDN);								// or dn
 								sout_time(SOUT_PACE_TIME);
@@ -639,13 +661,16 @@ void  save_vfo(U8 b_id){
 			return;												// exit now...
 		}
 	}
+	// save m/s vol
+	vfo_p[0].vol = vol_s;
+	vfo_p[1].vol = vol_m;
 	// combine VFO/offset into single 32 bit value
 	k = CS_WRITE | CS_OPEN;
 	for(i=startid, j=VFO_0 + (VFO_LEN * startid); i<stopid; i++){
 		rw32_nvr(j, vfo_p[i].vfo, k);							// write each element of the band state in sequence
-		k = CS_WRITE;									// the addr (j) only matters for first call in an "OPEN" sequence.  So...
-														// we don't update it here (the NVRAM increments it automatically).  Saves
-		rw16_nvr(j, vfo_p[i].offs, k);						// a lot of SPI clock cycles.
+		k = CS_WRITE;											// the addr (j) only matters for first call in an "OPEN" sequence.  So...
+																// we don't update it here (the NVRAM increments it automatically).  Saves
+		rw16_nvr(j, vfo_p[i].offs, k);							// a lot of SPI clock cycles.
 		rw8_nvr(j, vfo_p[i].dplx, k);
 		rw8_nvr(j, vfo_p[i].ctcss, k);
 		rw8_nvr(j, vfo_p[i].sq, k);
@@ -663,7 +688,7 @@ void  save_vfo(U8 b_id){
 		if(i == (stopid - 1)) k |= CS_CLOSE;
 		rw8_nvr(j, vfo_p[i].tsb, k);
 	}
-	rw8_nvr(XIT_0, ux129_xit, CS_WRITE | CS_OPEN);
+	rw8_nvr(XIT_0, ux129_xit, CS_WRITE | CS_OPEN);				// save xit/rit/bandid
 	rw8_nvr(RIT_0, ux129_rit, CS_WRITE);
 	rw8_nvr(BIDM_0, bandid_m, CS_WRITE);
 	rw8_nvr(BIDS_0, bandid_s, CS_WRITE | CS_CLOSE);
@@ -726,6 +751,8 @@ void  recall_vfo(void){
 	bandid_m = rw8_nvr(BIDM_0, 0, CS_IDLE);
 	bandid_s = rw8_nvr(BIDS_0, 0, CS_CLOSE);
 	read_xmode();
+	vol_s = vfo_p[0].vol;								// restore vol s/m
+	vol_m = vfo_p[1].vol;
 
 
 
@@ -901,10 +928,45 @@ void  vfo_change(U8 band){
 //-----------------------------------------------------------------------------
 // update_radio_all() sets the VFO flag to trigger a VFO update
 //-----------------------------------------------------------------------------
-void  update_radio_all(void){
+void  update_radio_all(U8 vector){
 
-	sin_flags = SIN_SQS_F|SIN_MSRF_F|SIN_SSRF_F|SIN_SEND_F|SIN_DSQ_F|SIN_SEL_F|SIN_VFOM_F|SIN_VFOS_F;
-	sout_flags = SOUT_MSQU_F|SOUT_SSQU_F|SOUT_MVOL_F|SOUT_SVOL_F|SOUT_VFOS_F|SOUT_VFOM_F;
+	switch(vector){
+	case UPDATE_ALL:
+	default:
+		sin_flags |= SIN_SQSM_F|SIN_SQSS_F|SIN_MSRF_F|SIN_SSRF_F|SIN_SEND_F|SIN_DSQA_F|SIN_DSQB_F|SIN_SEL_F|SIN_VFOM_F|SIN_VFOS_F;
+		sout_flags |= SOUT_MSQU_F|SOUT_SSQU_F|SOUT_MVOL_F|SOUT_SVOL_F|SOUT_VFOS_F|SOUT_VFOM_F;
+		break;
+
+	case MAIN_ALL:
+		sin_flags |= SIN_SQSM_F|SIN_MSRF_F|SIN_SEND_F|SIN_DSQA_F|SIN_SEL_F|SIN_VFOM_F;
+		sout_flags |= SOUT_MSQU_F|SOUT_MVOL_F|SOUT_VFOM_F;
+		break;
+
+	case SUB_ALL:
+		sin_flags |= SIN_SQSS_F|SIN_SSRF_F|SIN_DSQB_F|SIN_VFOS_F;
+		sout_flags |= SOUT_SSQU_F|SOUT_SVOL_F|SOUT_VFOS_F;
+		break;
+
+	case MAIN_FREQ:
+		sin_flags |= SIN_VFOM_F;
+		sout_flags |= SOUT_VFOM_F;
+		break;
+
+	case SUB_FREQ:
+		sin_flags |= SIN_VFOS_F;
+		sout_flags |= SOUT_VFOS_F;
+		break;
+
+	case MAIN_VQ:
+		sin_flags |= SIN_SQSM_F|SIN_MSRF_F|SIN_DSQA;
+		sout_flags |= SOUT_MSQU_F|SOUT_MVOL_F;
+		break;
+
+	case SUB_VQ:
+		sin_flags |= SIN_SQSS_F|SIN_SSRF_F|SIN_DSQB;
+		sout_flags |= SOUT_SSQU_F|SOUT_SVOL_F;
+		break;
+	}
 	return;
 }
 
@@ -1020,8 +1082,8 @@ U8 adjust_squ(U8 mainsub, S8 value){
 			if(value != 0) sout_flags |= SOUT_SSQU_F;					// send signal to update B-unit
 		}
 	}
-	if(mainsub == MAIN) set_qvnv(MAIN);									// store to NVRAM
-	else set_qvnv(SUB);
+	if(mainsub == MAIN) set_qnv(MAIN);									// store to NVRAM
+	else set_qnv(SUB);
 	return j;															// return current value
 }
 
@@ -1033,32 +1095,32 @@ U8 adjust_vol(U8 mainsub, S8 value){
 		i = value & 0x3f;												// mask flags
 		if(i > LEVEL_MAX) i = LEVEL_MAX;
 		if(mainsub){
-			vfo_p[bandid_m].vol = i;									// store main
-			j = vfo_p[bandid_m].vol;
+			vol_m = i;													// store main
+			j = vol_m;
 			sout_flags |= SOUT_MVOL_F;									// send signal to update B-unit
 		}else{
-			vfo_p[bandid_s].vol = i;									// store sub
-			j = vfo_p[bandid_s].vol;
+			vol_s = i;													// store sub
+			j = vol_s;
 			sout_flags |= SOUT_SVOL_F;									// send signal to update B-unit
 		}
 	}else{
 		i = value;														// +/- branch
 		if(mainsub){
-			vfo_p[bandid_m].vol += i;									// adjust main +/-
-			if(vfo_p[bandid_m].vol > 0x7f) vfo_p[bandid_m].vol = 0;
-			if(vfo_p[bandid_m].vol > LEVEL_MAX) vfo_p[bandid_m].vol = LEVEL_MAX;
-			j = vfo_p[bandid_m].vol;
+			vol_m += i;													// adjust main +/-
+			if(vol_m > 0x7f) vol_m = 0;
+			if(vol_m > LEVEL_MAX) vol_m = LEVEL_MAX;
+			j = vol_m;
 			if(value != 0) sout_flags |= SOUT_MVOL_F;					// send signal to update B-unit
 		}else{
-			vfo_p[bandid_s].vol += i;									// adjust sub +/-
-			if(vfo_p[bandid_s].vol > 0x7f) vfo_p[bandid_s].vol = 0;
-			if(vfo_p[bandid_s].vol > LEVEL_MAX) vfo_p[bandid_s].vol = LEVEL_MAX;
-			j = vfo_p[bandid_s].vol;
+			vol_s += i;													// adjust sub +/-
+			if(vol_s > 0x7f) vol_s = 0;
+			if(vol_s > LEVEL_MAX) vol_s = LEVEL_MAX;
+			j = vol_s;
 			if(value != 0) sout_flags |= SOUT_SVOL_F;					// send signal to update B-unit
 		}
 	}
-	if(mainsub == MAIN) set_qvnv(MAIN);									// store to NVRAM
-	else set_qvnv(SUB);
+	if(mainsub == MAIN) set_vnv(MAIN);									// store to NVRAM
+	else set_vnv(SUB);
 	return j;															// return current value
 }
 
@@ -1492,7 +1554,7 @@ S32 set_mhz_step(S32 sval){
 //-----------------------------------------------------------------------------
 // is_mic_updn() returns 0 if no button, -1 if dn, +1 if up
 //-----------------------------------------------------------------------------
-S8 is_mic_updn(U8 ipl){
+S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq){
 	static	S8	i;			// return value
 	static	U8	click_mem;	// button pressed memory
 			S8	rtn = 0;
@@ -1526,8 +1588,11 @@ S8 is_mic_updn(U8 ipl){
 		}else{
 			if((!mic_time(0)) && (sin_addr1 & SIN_MCK)){
 				mic_time(1);								// set short gap time for hold press
-	    		do_dial_beep();								// beep
-				rtn = i;
+				// if mem mode, start scan
+				if(!doscan(focus, 1)){
+		    		do_dial_beep();								// beep
+					rtn = i;
+				}
 			}
 		}
 	}
@@ -2012,7 +2077,7 @@ void write_nvmem(U8 band, U8 memnum){
 	rw8_nvr(addr, vfo_p[band].dplx, j);
 	rw8_nvr(addr, vfo_p[band].ctcss, j);
 	rw8_nvr(addr, vfo_p[band].sq, j);
-	rw8_nvr(addr, vfo_p[band].vol, j);
+	rw8_nvr(addr, 0, j);								// vol deprecated (vfo_p[band].vol now a spare) //
 	rw8_nvr(addr, ux129_xit, j);
 	rw8_nvr(addr, ux129_rit, j);
 	rw8_nvr(addr, band, j);
@@ -2043,7 +2108,7 @@ void read_nvmem(U8 band, U8 memnum){
 	vfo_p[band].dplx = rw8_nvr(addr, 0, j);
 	vfo_p[band].ctcss = rw8_nvr(addr, 0, j);
 	vfo_p[band].sq = rw8_nvr(addr, 0, j);
-	vfo_p[band].vol = rw8_nvr(addr, 0, j);
+	rw8_nvr(addr, 0, j);								// deprecated !!! this will be a recall of the spare: vfo_p[band].spare//
 	ux129_xit = rw8_nvr(addr, 0, j);
 	ux129_rit = rw8_nvr(addr, 0, j);
 	band = rw8_nvr(addr, 0, j);
@@ -2148,15 +2213,28 @@ void set_bandnv(void){
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-// set_qv() writes the vol/squ to NV ram
+// set_qnv() writes the squ to NV ram
 //-----------------------------------------------------------------------------
-void set_qvnv(U8 focus){
+void set_qnv(U8 focus){
 	U8	i;		// temp
 
 	if(focus == MAIN) i = bandid_m;
 	else i = bandid_s;
-	rw8_nvr(SQ_0+((VFO_LEN * (U32)i) + VFO_0), vfo_p[i].sq, CS_WRITE|CS_OPEN);
-	rw8_nvr(VOL_0, vfo_p[i].vol, CS_WRITE|CS_CLOSE);
+	rw8_nvr(SQ_0+((VFO_LEN * (U32)i) + VFO_0), vfo_p[i].sq, CS_WRITE|CS_OPENCLOSE);
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_vnv() writes the vol to NV ram
+//-----------------------------------------------------------------------------
+void set_vnv(U8 focus){
+
+	if(focus == MAIN){
+		rw8_nvr(VOL_0 + VFO_0 + VFO_LEN, vol_m, CS_WRITE|CS_OPENCLOSE);
+	}else{
+		rw8_nvr(VOL_0 + VFO_0, vol_s, CS_WRITE|CS_OPENCLOSE);
+	}
 	return;
 }
 
@@ -2171,6 +2249,46 @@ void set_tonenv(U8 focus){
 	else i = bandid_s;
 	rw8_nvr(CTCSS_0+((VFO_LEN * (U32)i) + VFO_0), vfo_p[i].ctcss, CS_WRITE|CS_OPENCLOSE);
 	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_scanmem() reads scan enable bit from NV space
+//-----------------------------------------------------------------------------
+U8 get_scanmem(U8 focus){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+	U32	addr;		// temps
+	U8	i;
+	U8	j;
+
+	if(focus == MAIN) i = bandid_m;						// set main/sub index
+	else i = bandid_s;
+	addr = mem_band[i] + (mem[i] * MEM_LEN);			// calc base mem addr
+	addr += sizeof(U32) + sizeof(U16);					// point to duplex byte
+	j = rw8_nvr(addr, 0, CS_READ | CS_OPENCLOSE);		// read byte
+	return j & SCANEN_F;								// return masked bit
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// togg_scanmem() toggles scan enable bit in NV space.  Returns new value of bit
+//-----------------------------------------------------------------------------
+U8 togg_scanmem(U8 focus){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+	U32	addr;		// temps
+	U8	i;
+	U8	j;
+
+	if(focus == MAIN) i = bandid_m;						// set main/sub index
+	else i = bandid_s;
+	addr = mem_band[i] + (mem[i] * MEM_LEN);			// calc base mem addr
+	addr += sizeof(U32) + sizeof(U16);					// point to duplex byte
+	j = rw8_nvr(addr, 0, CS_READ | CS_OPENCLOSE);		// read byte
+	j ^= SCANEN_F;										// invert scan bit
+	rw8_nvr(addr, j, CS_WRITE | CS_OPENCLOSE);			// write byte
+	return j & SCANEN_F;								// return masked bit
 }
 
 // end radio.c

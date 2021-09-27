@@ -55,6 +55,7 @@
 #define SEC100MS  100
 #define SEC250MS  250
 #define SEC300MS  300
+#define SEC400MS  400
 #define SEC500MS  500
 #define SEC750MS  750
 #define SEC1     1000
@@ -103,7 +104,7 @@
 #define TIMER3_PS 32
 
 #define TIMER1B_PS 		1			// prescale value for timer1B
-#define	BBSPICLK_FREQ	200000L		// edge freq fro BB SPI clk
+#define	BBSPICLK_FREQ	400000L		// edge freq for BB SPI clk
 
 #define	TPULSE	(100L)				// in usec
 #define TMIN	(((SYSCLK / 100) * TPULSE)/10000L)	// minimum pulse width
@@ -386,6 +387,7 @@ U8 micdb_time(U8 tf);
 U8 mute_time(U8 tf);
 U8 ts_time(U8 tf);
 U8 slide_time(U8 tf);
+U8 scan_time(U8 focus, U8 tf);
 
 void set_beep(U16 beep_frq, U16 b_count);
 void do_beep(U16 beep_cycles);

@@ -1117,7 +1117,9 @@ void Timer1A_ISR(void)
 
 //    GPIO_PORTD_DATA_R ^= SPARE4;
 
-	txd1_rdy = 1;
-	TIMER1_ICR_R = TIMER1_MIS_R & TIMER_MIS_AMASK;
+	if(TIMER1_MIS_R & TIMER_MIS_TATOMIS){
+		txd1_rdy = 1;
+	}
+	TIMER1_ICR_R = TIMER1_MIS_R & TIMERA_MIS_MASK;
     return;
 }

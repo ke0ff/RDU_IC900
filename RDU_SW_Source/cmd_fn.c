@@ -58,9 +58,13 @@ enum err_enum{ no_response, no_device, target_timeout };
 // enum list of command numerics
 //	each enum corresponds to a command from the above list (lastcmd corresponds
 //	with the last entry, 0xff)
-const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0NR\0NW\0NC\0U\0TI\0T\0?\0H\0VERS\0\xff"};
-enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,nvrd,nvwr,nvcmd,tstuart1,timer_tst,
-			   trig_la,help1,help2,vers,lastcmd,helpcmd };
+//                                                           1     1   1   1   1  1     1   1  1  2  2
+//                        0  1  2  3   4   5  6  7  8  9  0  1     2   3   4   5  6     7   8  9  0  1
+const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0NR\0NW\0NC\0U\0SCAN\0TI\0T\0?\0H\0VERS\0\xff"};
+//             0      1       2       3       4       5       6      7       8       9       10       11   12   13   14    15       16
+enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,
+//             17        18      19    20    21
+			   timer_tst,trig_la,help1,help2,vers,lastcmd,helpcmd };
 
 #define	cmd_type	char	// define as char for list < 255, else define as int
 
@@ -266,6 +270,8 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					putsQ(obuf);
 					sprintf(obuf,"SQ_0 = %d", SQ_0);
 					putsQ(obuf);
+					sprintf(obuf,"buferrs = %d", get_error());
+					putsQ(obuf);
 				case vers:														// SW VERSION CMD
 					dispSWvers();
 					break;
@@ -279,6 +285,14 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						set_beep(params[1], (U16)(((U32)params[1] * 75L)/1000L));
 					}
 					do_beep(params[0]);
+					break;
+
+				case scan_cmd:
+					params[0] = MAIN;
+					params[1] = 0;
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					doscan((U8)params[0], (U8)params[1]);
+					putsQ("doscan");
 					break;
 
 				case hm_data:													// debug, send SO] data (2 concat 16b params)

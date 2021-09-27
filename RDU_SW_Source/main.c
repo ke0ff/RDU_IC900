@@ -13,20 +13,42 @@
 /********************************************************************
  *  Project scope rev notes:
  *    				 To-do Checklist time!
- *    				 !!! Need to think about vol management.  It is confusing even though it works as intended.  Is this really what we want???
- *
  *    				 !!! there is a noticable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
  *
  *    				 * test band switching (VFO button)
  *    				 * SET loop:
  *    				 	- DIM brightness setting, LCD and button
  *    				 	- BRT brightness setting, LCD and button
- *    				 * Scan mode
+ *    				 * VFO Scan mode
  *    				 * XIT/RIT adjust (perhaps use VFOchr_H ???)
  *
  *
  *    Project scope rev History:
+ *    09-26-21 jmh:	 PTT active cancels main mem scan.
+ *    				 Implemented a different PTT edge trap and this seems to have improved the lost edge issue (none seen yet).
+ *    				 Implemented scan on/off (same as for orig IC-900) for mem scan.
+ *    				 In update_lcd_all(), moved "msmet(0xff, 0)" to "mem disabled" branch.  This keeps the RF meter from "pulsing" when the sub-band
+ *    				 	is scanning and the main band is in TX.  !!! need to revisit the msmet "init" in update_lcd_all()...
+ *    09-25-21 jmh:	 Added focus to update_radio_all().  !!! may still need to refine this
+ *    				 The SIN buffer is getting overrun.  Can cause a rare return of "0x0" data.  Added another call to process_SIN() in process_IO()
+ *    				 	which seems to let the system keep up with the SIN data, but only if it is idle.  Mem scan causes it to loose pace.
+ *    				 	Increasing the SPI clock rate to 200KHz seems to allow scan to keep up.  Have to see if this causes other issues.
+ *    				 	If the SSI clock has to be slowed back down, I'll prolly have to come up with a queued SSI that has a sharing mechanism
+ *    				 	between the LCD and NVRAM.  Added debug puts() to list error count for overrun... "0err = d..d".  Displays whenever the error
+ *    				 	count changes.
+ *    			!!!	 A "quick" ptt press can lock the PTT on until another press cycle.  The trailing edge of PTT seems to be getting lost.  This is
+ *    				 	probably due to the fact that there is a lot of processing getting taken up in the process loops which is causing the closely
+ *    				 	spaced trailing edge to get lost.  !!! need to rethink the change-flag system, or find a work-around for PTT.
+ *    09-23-21 jmh:	 Implemented mem scan on main and sub.  Need to:
+ *    			!!!		sub scan needs to change bands when reaching the end of the current band.
+ *    09-23-21 jmh:	 Added support fns for mem skip.  MW hold writes to mem or VFO. MW release (before hold is reached) toggles "skip" if mem
+ *    					mode active.  LCD update updates skip annunciator and annunc is turned off if mem mode is off.
+ *    				 Added infrastructure for mem scan mode.  mode flags, timers, and timer fns in place.  Prelim stub for main scan processing added
+ *    				 	to process_DIAL().
  *    09-22-21 jmh:	 Tweaks to vol/sq/ctcss nv save process.
+ *    				 Abandoned "vol everywhere"... now just have main and sub volume (1 byte ea.).  They are stored in the old NVRAM vol locations
+ *    				 	for the 10m and 6m modules.  !!! For the memory NVRAM space, need to deprecate the vol setting (turn it into a spare).
+ *    				 	Will probably keep the .vol struct variable as this simplifies the saving of the VFO data to NVRAM.
  *    09-21-21 jmh:	 Increased dial debounce to 75 ms (was 50).
  *    				 Tweaks to set_pwm and SMUTEchr_H.
  *    09-20-21 jmh:	 Continued >2 module debug.  Chased issue where mem/call IPL recall wasn't working.  Looks to be fixed.
@@ -264,6 +286,8 @@ U8		micdbtimer;						// mic button dbounce timer
 U8		mutetimer;						// vol mute timer
 U16		tstimer;						// TS adj mode timer
 U16		slidetimer;						// txt slide rate timer
+U16		scanmtimer;						// main scan timer
+U16		scanstimer;						// sub scan timer
 
 U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
@@ -381,7 +405,7 @@ int main(void){
     	while(gotchrQ()) getchrQ();						// clear serial input in case there was some POR garbage
     	gets_tab(buf, rebufN, GETS_INIT);				// initialize gets_tab()
         set_led(0xff, 0x00);							// init LED levels
-        set_pwm(0, 99);								// master = 100%
+        set_pwm(0, 99);									// master = 100%
         set_led(5, 1);									// enable LEDs at 10% until the OS takes over
         set_pwm(5, 10);
         set_led(6, 1);
@@ -616,6 +640,7 @@ char process_IO(U8 flag){
 	}
 	process_SIN(0);
 	process_SOUT(0);
+	process_SIN(0);
 	process_UI(0);
 //	process_CCMD(0);									// process CCMD inputs
 	return swcmd;
@@ -1318,6 +1343,35 @@ U8 slide_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
+// scan_time() sets/reads the scan rate timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
+//-----------------------------------------------------------------------------
+U8 scan_time(U8 focus, U8 tf){
+	U8	i = 0;		// temp
+
+	if(focus == MAIN){
+		if(tf == 0xff){
+			scanmtimer = 0;
+		}else{
+			if(tf == 1){
+				scanmtimer = SCAN_TIME;
+			}
+		}
+		if(scanmtimer) i = TRUE;
+	}else{
+		if(tf == 0xff){
+			scanstimer = 0;
+		}else{
+			if(tf == 1){
+				scanstimer = SCAN_TIME;
+			}
+		}
+		if(scanstimer) i = TRUE;
+	}
+	return i;
+}
+
+//-----------------------------------------------------------------------------
 // set_dial() sets value of main dial reg
 // get_dial() returns value of main dial reg
 //-----------------------------------------------------------------------------
@@ -1427,10 +1481,12 @@ void do_beep(U16 beep_cycles){
 //-----------------------------------------------------------------------------
 void Timer0A_ISR(void){
 
-	TIMER0_ICR_R = TIMER0_MIS_R;
-	if(--beep_counter == 0){
-		TIMER0_CTL_R &= ~(TIMER_CTL_TAEN);								// disable timer;
+	if(TIMER0_MIS_R & (TIMER_MIS_CAEMIS | TIMER_MIS_TATOMIS)){
+		if(--beep_counter == 0){
+			TIMER0_CTL_R &= ~(TIMER_CTL_TAEN);							// disable timer;
+		}
 	}
+	TIMER0_ICR_R = TIMERA_MIS_MASK;										// clear A-intr
 	return;
 }
 
@@ -1462,7 +1518,6 @@ static	U16	key_last;				// last key
 #define	LED_PERIOD		10000		// sets length of LED cycle (ms)
 
 //	GPIO_PORTB_DATA_R |= LOCK;		// toggle debug pin -- 2.25 us ISR exec time at 1.0003ms rate
-	TIMER3_ICR_R = TIMER3_MIS_R;
 	if(iplt2){										// if flag is set, perform ipl initialization
 		iplt2 = 0;
 		free_32 = 0;
@@ -1487,172 +1542,181 @@ static	U16	key_last;				// last key
 		mictimer = 0;
 //		prescale = 0;				// init resp led regs
 	}
-	// state machine to process local keypad
-	// kbdn_flag == true if key pressed (app needs to clear), also has "hold" flag that indicates
-	//	that the key has been pressed for at least the KEY_HOLD time (app needs to clear)
-	// kbup_flag == true if key is released (app needs to clear)
-	// Row address to switch matrix is only advanced when there is no keypress (so, this alg. doesn't do
-	// key rollover).
+	if(TIMER3_MIS_R & TIMER_MIS_TATOMIS){
+		// state machine to process local keypad
+		// kbdn_flag == true if key pressed (app needs to clear), also has "hold" flag that indicates
+		//	that the key has been pressed for at least the KEY_HOLD time (app needs to clear)
+		// kbup_flag == true if key is released (app needs to clear)
+		// Row address to switch matrix is only advanced when there is no keypress (so, this alg. doesn't do
+		// key rollover).
 
-	if(--kpscl == 0){
-		kpscl = KEY_PRESCALE;
-		// read keypad row bits
-//		dbug8 = GPIO_PORTB_DATA_R;
-		key_temp = ((U16)(GPIO_PORTB_DATA_R & KB_NOKEYB) << 6) | ((U16)(GPIO_PORTA_DATA_R & KB_NOKEYA) << 2) | ((U16)(GPIO_PORTE_DATA_R & KB_NOKEYE) >> 2);
-		if(!(key_temp & COL0_BIT)){						// de-mux spare_S4 switch
-			S4_stat = key_temp & S4_BIT;				// strip out the status of the S4 switch
-			key_temp |= S4_BIT;							// set to "no key" state
-		}
-		jj = key_temp & ~(COL1_BIT|COL0_BIT);			// mask off col bits
-		switch(kp_state){
-		default:
-			kp_state = KEYP_IDLE;						// re-cage state
-		case KEYP_IDLE:
-			if(jj == KB_NOKEY){
-				// advance key addr to next row (flip-flops COL0 and COL1)
-				if(GPIO_PORTE_DATA_R & COL0){
-					GPIO_PORTE_DATA_R |= (COL0|COL1);
-					GPIO_PORTE_DATA_R = (GPIO_PORTE_DATA_R & ~COL0) | COL1;
+		if(--kpscl == 0){
+			kpscl = KEY_PRESCALE;
+			// read keypad row bits
+	//		dbug8 = GPIO_PORTB_DATA_R;
+			key_temp = ((U16)(GPIO_PORTB_DATA_R & KB_NOKEYB) << 6) | ((U16)(GPIO_PORTA_DATA_R & KB_NOKEYA) << 2) | ((U16)(GPIO_PORTE_DATA_R & KB_NOKEYE) >> 2);
+			if(!(key_temp & COL0_BIT)){						// de-mux spare_S4 switch
+				S4_stat = key_temp & S4_BIT;				// strip out the status of the S4 switch
+				key_temp |= S4_BIT;							// set to "no key" state
+			}
+			jj = key_temp & ~(COL1_BIT|COL0_BIT);			// mask off col bits
+			switch(kp_state){
+			default:
+				kp_state = KEYP_IDLE;						// re-cage state
+			case KEYP_IDLE:
+				if(jj == KB_NOKEY){
+					// advance key addr to next row (flip-flops COL0 and COL1)
+					if(GPIO_PORTE_DATA_R & COL0){
+						GPIO_PORTE_DATA_R |= (COL0|COL1);
+						GPIO_PORTE_DATA_R = (GPIO_PORTE_DATA_R & ~COL0) | COL1;
+					}else{
+						GPIO_PORTE_DATA_R |= (COL0|COL1);
+						GPIO_PORTE_DATA_R = (GPIO_PORTE_DATA_R & ~COL1) | COL0;
+					}
 				}else{
-					GPIO_PORTE_DATA_R |= (COL0|COL1);
-					GPIO_PORTE_DATA_R = (GPIO_PORTE_DATA_R & ~COL1) | COL0;
+					keybd_timer = KP_DEBOUNCE_DN;			// set debounce timer (dn)
+					kp_state = KEYP_DBDN;					// advance state
+					kp_keypat = jj;							// save pattern
 				}
-			}else{
-				keybd_timer = KP_DEBOUNCE_DN;			// set debounce timer (dn)
-				kp_state = KEYP_DBDN;					// advance state
-				kp_keypat = jj;							// save pattern
-			}
-			break;
+				break;
 
-		case KEYP_DBDN:
-			if(jj != kp_keypat){
-				kp_state = KEYP_IDLE;					// false key, return to idle
-			}else{
-				if(--keybd_timer == 0){
-					kbdn_flag = KEY_PR_FL;				// set key pressed flag
-					kbd_buff[kbd_hptr++] = key_temp;	// store key code in buff
-					key_last = key_temp;
-					if(kbd_hptr == KBD_BUFF_END){		// update buf ptr w/ roll-over
-						kbd_hptr = 0;
-					}
-					if(kbd_hptr == kbd_tptr){			// flag buffer error
-						kbd_stat |= KBD_ERR;
-					}
-					kphold_timer = KEY_HOLD_TIME;		// set hold timer (~~2 sec)
-					kp_state = KEYP_PRESSED;			// advance state
-//					q_beep;
-				}
-			}
-			break;
-
-		case KEYP_PRESSED:
-			if(jj == KB_NOKEY){
-				keybd_timer = KP_DEBOUNCE_UP;			// set debounce timer (up)
-				kp_state = KEYP_DBUP;					// up debounce state
-			}else{
-				if(kphold_timer == 0){
-					kbdn_flag |= KEY_HOLD_FL;			// set key-hold flag
-					kp_state = KEYP_HOLD;				// hold state
-					kbd_buff[kbd_hptr++] = key_last | KEY_HOLD_KEY;	// store key code with HOLD flag in buff
-					if(kbd_hptr == KBD_BUFF_END){		// update buf ptr w/ roll-over
-						kbd_hptr = 0;
-					}
-//					beepdly_timer = BEEP2_COUNT;
-//					q_beep;
+			case KEYP_DBDN:
+				if(jj != kp_keypat){
+					kp_state = KEYP_IDLE;					// false key, return to idle
 				}else{
-					kphold_timer -= 1;					// update hold timer
-				}
-			}
-			break;
-
-		case KEYP_HOLD:
-			if(jj == KB_NOKEY){
-				keybd_timer = KP_DEBOUNCE_UP;			// set debounce timer (up)
-				kp_state = KEYP_DBUP;					// up debounce state
-			}
-			break;
-
-		case KEYP_DBUP:
-			if(jj != KB_NOKEY){
-				kp_state = KEYP_HOLD;					// false key up, return to HOLD
-			}else{
-				if(--keybd_timer == 0){
-					kbup_flag = 1;						// set key up flag
-					kp_state = KEYP_IDLE;				// advance state
-					kbd_buff[kbd_hptr++] = key_last | KEY_RELEASE_KEY;	// store key release code in buff
-					if(kbd_hptr == KBD_BUFF_END){		// update buf ptr w/ roll-over
-						kbd_hptr = 0;
+					if(--keybd_timer == 0){
+						kbdn_flag = KEY_PR_FL;				// set key pressed flag
+						kbd_buff[kbd_hptr++] = key_temp;	// store key code in buff
+						key_last = key_temp;
+						if(kbd_hptr == KBD_BUFF_END){		// update buf ptr w/ roll-over
+							kbd_hptr = 0;
+						}
+						if(kbd_hptr == kbd_tptr){			// flag buffer error
+							kbd_stat |= KBD_ERR;
+						}
+						kphold_timer = KEY_HOLD_TIME;		// set hold timer (~~2 sec)
+						kp_state = KEYP_PRESSED;			// advance state
+	//					q_beep;
 					}
 				}
+				break;
+
+			case KEYP_PRESSED:
+				if(jj == KB_NOKEY){
+					keybd_timer = KP_DEBOUNCE_UP;			// set debounce timer (up)
+					kp_state = KEYP_DBUP;					// up debounce state
+				}else{
+					if(kphold_timer == 0){
+						kbdn_flag |= KEY_HOLD_FL;			// set key-hold flag
+						kp_state = KEYP_HOLD;				// hold state
+						kbd_buff[kbd_hptr++] = key_last | KEY_HOLD_KEY;	// store key code with HOLD flag in buff
+						if(kbd_hptr == KBD_BUFF_END){		// update buf ptr w/ roll-over
+							kbd_hptr = 0;
+						}
+	//					beepdly_timer = BEEP2_COUNT;
+	//					q_beep;
+					}else{
+						kphold_timer -= 1;					// update hold timer
+					}
+				}
+				break;
+
+			case KEYP_HOLD:
+				if(jj == KB_NOKEY){
+					keybd_timer = KP_DEBOUNCE_UP;			// set debounce timer (up)
+					kp_state = KEYP_DBUP;					// up debounce state
+				}
+				break;
+
+			case KEYP_DBUP:
+				if(jj != KB_NOKEY){
+					kp_state = KEYP_HOLD;					// false key up, return to HOLD
+				}else{
+					if(--keybd_timer == 0){
+						kbup_flag = 1;						// set key up flag
+						kp_state = KEYP_IDLE;				// advance state
+						kbd_buff[kbd_hptr++] = key_last | KEY_RELEASE_KEY;	// store key release code in buff
+						if(kbd_hptr == KBD_BUFF_END){		// update buf ptr w/ roll-over
+							kbd_hptr = 0;
+						}
+					}
+				}
+				break;
 			}
-			break;
 		}
-	}
-	// process app timers
-	free_32++;											// update large free-running timer
-	if (beepdly_timer != 0){							// update wait timer
-		if(--beepdly_timer == 0){
-			q_beep;										// do beep# 2
+		// process app timers
+		free_32++;											// update large free-running timer
+		if (beepdly_timer != 0){							// update wait timer
+			if(--beepdly_timer == 0){
+				q_beep;										// do beep# 2
+			}
 		}
-	}
-	if (waittimer != 0){								// update wait timer
-		waittimer--;
-	}
-	if (sintimer != 0){									// update sin activity timer
-		sintimer--;
-	}
-	if (souttimer != 0){								// update sin activity timer
-		souttimer--;
-	}
-	if (mhztimer != 0){									// update mhz digit timer
-		mhztimer--;
-	}
-	if (vtimer != 0){									// update vol/squ adjust timer
-		vtimer--;
-	}
-	if (qtimer != 0){									// update vol/squ adjust timer
-		qtimer--;
-	}
-	if (settimer != 0){									// update set mode timer
-		settimer--;
-	}
-	if (offstimer != 0){								// update offs adjust timer
-		offstimer--;
-	}
-	if (subtimer != 0){									// update sub adjust timer
-		subtimer--;
-	}
-	if (mictimer != 0){									// update mic button repeat timer
-		mictimer--;
-	}
-	if (micdbtimer != 0){								// update mic button debounce timer
-		micdbtimer--;
-	}
-	if (mutetimer != 0){								// volume mute timer
-		mutetimer--;
-	}
-	if (tstimer != 0){									// update set mode timer
-		tstimer--;
-	}
-	if (slidetimer != 0){								// update text slide timer
-		slidetimer--;
-	}
-	if(num_beeps){
-		if (beepgaptimer != 0){							// update beep gap timer
-			--beepgaptimer;
-		}else{
-			q_beep;										// dial beep
-			num_beeps--;
-			beepgaptimer = BEEP_GAP;
+		if (waittimer != 0){								// update wait timer
+			waittimer--;
 		}
-	}
-	if (dialtimer != 0){								// update wait timer
-		if(!(--dialtimer)){
-			GPIO_PORTC_ICR_R = PORTC_DIAL;				// clear int flags
-			GPIO_PORTC_IM_R |= PORTC_DIAL;				// enable edge intr
+		if (sintimer != 0){									// update sin activity timer
+			sintimer--;
+		}
+		if (souttimer != 0){								// update sin activity timer
+			souttimer--;
+		}
+		if (mhztimer != 0){									// update mhz digit timer
+			mhztimer--;
+		}
+		if (vtimer != 0){									// update vol/squ adjust timer
+			vtimer--;
+		}
+		if (qtimer != 0){									// update vol/squ adjust timer
+			qtimer--;
+		}
+		if (settimer != 0){									// update set mode timer
+			settimer--;
+		}
+		if (offstimer != 0){								// update offs adjust timer
+			offstimer--;
+		}
+		if (subtimer != 0){									// update sub adjust timer
+			subtimer--;
+		}
+		if (mictimer != 0){									// update mic button repeat timer
+			mictimer--;
+		}
+		if (micdbtimer != 0){								// update mic button debounce timer
+			micdbtimer--;
+		}
+		if (mutetimer != 0){								// volume mute timer
+			mutetimer--;
+		}
+		if (tstimer != 0){									// update set mode timer
+			tstimer--;
+		}
+		if (slidetimer != 0){								// update text slide timer
+			slidetimer--;
+		}
+		if (scanmtimer != 0){								// update main scan timer
+			scanmtimer--;
+		}
+		if (scanstimer != 0){								// update sub scan timer
+			scanstimer--;
+		}
+		if(num_beeps){
+			if (beepgaptimer != 0){							// update beep gap timer
+				--beepgaptimer;
+			}else{
+				q_beep;										// dial beep
+				num_beeps--;
+				beepgaptimer = BEEP_GAP;
+			}
+		}
+		if (dialtimer != 0){								// update wait timer
+			if(!(--dialtimer)){
+				GPIO_PORTC_ICR_R = PORTC_DIAL;				// clear int flags
+				GPIO_PORTC_IM_R |= PORTC_DIAL;				// enable edge intr
+			}
 		}
 	}
 //	GPIO_PORTB_DATA_R &= ~LOCK;			// toggle debug pin
+	TIMER3_ICR_R = TIMERA_MIS_MASK;								// clear all A-intr
 	return;
 }
 
