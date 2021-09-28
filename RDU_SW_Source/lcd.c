@@ -317,7 +317,10 @@ void update_lcd(U8 focus){
 			mema(MAIN, 0);													// turn off "M"
 			mskpa(MAIN, 1);													// "skp" annunc = off
 		}
-		mfreq(get_freq(MAIN), 0);											// Frequency display
+//		mfreq(get_freq(MAIN), 0);											// Frequency display
+		if(ptt_change & PTT_KEYED) i = MAIN | VMODE_ISTX;
+		else i = MAIN;
+		mfreq(get_freq(i), 0);							// update main freq display from vfo or vfotr
 	}else{
 		//**************************************
 		// update Duplex display, sub
@@ -812,11 +815,11 @@ U8 process_MS(U8 mode){
 				if(band_focus == MAIN_MODE){
 					inc_dplx(MAIN);
 					inc_dplx(MAIN);
-					mfreq((U32)get_offs(band_focus), LEAD0_BLINK);
+					mfreq((U32)get_offs(band_focus), LEAD0);
 				}else{
 					inc_dplx(SUB);
 					inc_dplx(SUB);
-					sfreq((U32)get_offs(band_focus), LEAD0_BLINK);
+					sfreq((U32)get_offs(band_focus), LEAD0);
 				}
 				mhz_time(1);
 				offs_time(1);
@@ -1102,7 +1105,12 @@ void process_VFODISP(U8 focus){
 //				sprintf(dgbuf,"vfodisp: %02x",vfo_display); //!!!
 //				putsQ(dgbuf);
 			if(vfo_display & MAIN){
-				if(vfo_display & VMODE_ISTX){
+				if(ptt_change & PTT_KEYED) i = MAIN | VMODE_ISTX;
+				else i = MAIN;
+				mfreq(get_freq(i), 0);							// update main freq display from vfo or vfotr
+				vfo_display &= ~(VMODE_ISTX | MAIN);
+
+/*				if(vfo_display & VMODE_ISTX){
 					mfreq(get_freq(MAIN | VMODE_ISTX), 0);		// update main freq display from vfotr
 //						sprintf(dgbuf,"vfofrqT: %d",get_freq(focus | 0x80)); //!!!
 //						putsQ(dgbuf);
@@ -1111,7 +1119,7 @@ void process_VFODISP(U8 focus){
 //						sprintf(dgbuf,"vfofrqR: %d",get_freq(focus)); //!!!
 //						putsQ(dgbuf);
 				}
-				vfo_display &= ~(VMODE_ISTX | MAIN);
+				vfo_display &= ~(VMODE_ISTX | MAIN);*/
 			}else{
 				if(vfo_display & SUB_D){
 					sfreq(get_freq(SUB), 0);					// update sub freq display
@@ -1441,10 +1449,10 @@ U32 process_DIAL(U8 focus){
 							offs_time(0xff);
 						}
 						if(i && (focus == MAIN)){
-							mfreq(get_vfot(), LEAD0_BLINK);				// update main display
+							mfreq(get_vfot(), LEAD0);					// update main display
 						}
 						if(i && (focus == SUB)){
-							sfreq(get_vfot(), LEAD0_BLINK);				// update sub display
+							sfreq(get_vfot(), LEAD0);					// update sub display
 						}
 						vfo_change(focus);
 					}
@@ -1467,7 +1475,7 @@ U32 process_DIAL(U8 focus){
 									read_mem(MAIN, get_memnum(MAIN, 0)); // read new mem
 									rflags |= SIN_SSRF_F;				// force update of SSRF
 									save_mc(MAIN);						// save changes to NVRAM
-									update_lcd(focus);
+									update_lcd(MAIN);
 									update_radio_all(MAIN_ALL);
 								}
 							}
@@ -1487,7 +1495,7 @@ U32 process_DIAL(U8 focus){
 								read_mem(SUB, get_memnum(SUB, 0));		// read new mem
 								rflags |= SIN_SSRF_F;					// force update of SSRF
 								save_mc(SUB);							// save changes to NVRAM
-								update_lcd(focus);
+								update_lcd(SUB);
 								update_radio_all(SUB_ALL);
 							}
 						}
@@ -1540,9 +1548,9 @@ void digblink(U8 digaddr, U8 tf){
 
 //-----------------------------------------------------------------------------
 // mfreq() sets the main frequency.  binfreq = binary KHz
-//	set blink to display leading zeros
+//	set lzero to display leading zeros
 //-----------------------------------------------------------------------------
-void mfreq(U32 binfreq, U8 blink){
+void mfreq(U32 binfreq, U8 lzero){
 	U8	i;
 	U8	k = 0;
 	U32	ii;
@@ -1560,8 +1568,8 @@ void mfreq(U32 binfreq, U8 blink){
 		}
 	}else{
 		ii = bin32_bcdp(binfreq);						// convert binary to BCD
-		// suppress leading zeros (if blink == 0)
-		if(!(blink == LEAD0_BLINK)){					// if no leading zeros, skip this
+		// suppress leading zeros (if lzero == 0)
+		if(lzero != LEAD0){								// if no leading zeros, skip this
 			jj = 0x0f000000L;							// start at GHz
 			do{
 				if((ii & jj) == 0){						// suppress leading zeros (set nybble to 0xf) until non-zero digit
@@ -1592,9 +1600,9 @@ void mfreq(U32 binfreq, U8 blink){
 
 //-----------------------------------------------------------------------------
 // sfreq() sets the sub frequency.  binfreq = binary KHz
-//	set blink to display leading zeros
+//	set lzero to display leading zeros
 //-----------------------------------------------------------------------------
-void sfreq(U32 binfreq, U8 blink){
+void sfreq(U32 binfreq, U8 lzero){
 	U8	i;
 	U8	k = 0;
 	U32	ii;
@@ -1613,8 +1621,8 @@ void sfreq(U32 binfreq, U8 blink){
 	}else{
 		// supress leading zeros
 		ii = bin32_bcdp(binfreq);						// convert binary to BCD
-		// suppress leading zeros (if blink == 0)
-		if(!(blink == LEAD0_BLINK)){					// if no leading zeros, skip this
+		// suppress leading zeros (if lzero == 0)
+		if(lzero != LEAD0){								// if no leading zeros, skip this
 			jj = 0x0f000000L;							// start at GHz
 			do{
 				if((ii & jj) == 0){						// suppress leading zeros (set nybble to 0xf) until non-zero digit

@@ -71,7 +71,7 @@
 #define	NO_B_PRSNT		0x04		// no base present
 
 // mfreq/sfreq blink flags
-#define	LEAD0_BLINK	0xff
+#define	LEAD0		0xff
 #define	MAIN_CS		0x80			// sets main lcd chip in digblink()
 
 #define	MHZ_ONE		0x80

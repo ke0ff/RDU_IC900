@@ -24,6 +24,10 @@
  *
  *
  *    Project scope rev History:
+ *    09-27-21 jmh:	 mfreq => renamed "blink" param to "lzero".
+ *    				 Fixed bug in process_DIAL() in scan section.  update_lcd() was using focus, but should have used MAIN/SUB defines. Was causing
+ *    				 	main freq to parrot the sub display when sub was scanning and main = TX.
+ *    				 Changed main freq display operations to use "ptt_change" when calling "get_freq()".
  *    09-26-21 jmh:	 PTT active cancels main mem scan.
  *    				 Implemented a different PTT edge trap and this seems to have improved the lost edge issue (none seen yet).
  *    				 Implemented scan on/off (same as for orig IC-900) for mem scan.

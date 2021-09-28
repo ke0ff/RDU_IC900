@@ -486,7 +486,7 @@ U8 process_SOUT(U8 cmd){
 				if(ii != ptt_mem) {														// PTT change detected
 					ptt_mem = ii;														// save change
 					if(ii){
-						i = 1;															// PTT is T
+						i = 1;															// PTT is TX
 						if(get_xmodeq() & MSCANM_XFLAG){
 							doscan(MAIN, 0);											// shut down scan
 							do_1beep();
@@ -1712,12 +1712,12 @@ U8 get_band_index(U8 main){
 // get_freq() returns vfo of indicated band
 //	if hi-bit set, return the tr vfo
 //-----------------------------------------------------------------------------
-U32 get_freq(U8 main){
+U32 get_freq(U8 focust){
 
-	if(main & VMODE_ISTX){
+	if(focust & VMODE_ISTX){
 		return vfotr;
 	}else{
-	    if(main) return vfo_p[bandid_m].vfo;
+	    if((focust & MAIN) == MAIN) return vfo_p[bandid_m].vfo;
 	    else return vfo_p[bandid_s].vfo;
 	}
 }

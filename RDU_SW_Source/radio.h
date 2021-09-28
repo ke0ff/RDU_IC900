@@ -215,7 +215,7 @@ void set_tsab(U8 main, U8 absel, U8 value);
 void set_ab(U8 main, U8 tf);
 S32 set_mhz_step(S32 sval);
 S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq);
-U32 get_freq(U8 main);
+U32 get_freq(U8 focust);
 void copy_vfot(U8 main);
 void temp_vfo(U8 main);
 U32 get_vfot(void);
