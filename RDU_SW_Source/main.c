@@ -24,6 +24,12 @@
  *
  *
  *    Project scope rev History:
+ *    09-30-21 jmh:	 Modified SIN interrupt to ignore input data if it is the same as the last data.  Resets the activity timer in that interrupt now.
+ *    				 process_SIN only executes BERR code once now.  !!! Need to come up wit a re-start sequence without power cycling if the BERR
+ *						is resolved.
+ *    09-29-21 jmh:	 Discovered SIN overruns due to BBSPI implementation eating up too much cycle time in the process loop. Increased BBSPI clock rate
+ *    					to compensate.  Seems to help, but there is still a lot of time spent in the SPI routines.  Need to further investigate
+ *    					options to reduce LCD traffic.  Same for NVRAM traffic.
  *    09-27-21 jmh:	 mfreq => renamed "blink" param to "lzero".
  *    				 Fixed bug in process_DIAL() in scan section.  update_lcd() was using focus, but should have used MAIN/SUB defines. Was causing
  *    				 	main freq to parrot the sub display when sub was scanning and main = TX.
@@ -1390,6 +1396,14 @@ S8 get_dial(U8 tf){
 
 	if(tf) main_dial = 0;
 	return i;
+}
+
+//-----------------------------------------------------------------------------
+// get_free() returns value of free_32
+//-----------------------------------------------------------------------------
+U32 get_free(void){
+
+	return free_32;
 }
 
 //-----------------------------------------------------------------------------

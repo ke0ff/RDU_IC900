@@ -150,8 +150,8 @@ U32	so_initb[] = { 0x08000000, 0x10000000, 0x18000000, 0x20000000, 0x28000000, 0
 U32	so_initc[] = {
 				   0x3D220050, 					// squ left (main)
 				   0x3D020048,					// squ right
-				   0x3E202090,					// vol left	(main)
-				   0x3E002088,					// vol right
+				   0x3E201050,					// vol left	(main)
+				   0x3E001048,					// vol right
 				   0x3CA000EA					// tone enc
 				   };
 
@@ -369,6 +369,7 @@ void init_radio(void){
 			i++;
 		}
 	}
+	mute_band = MS_MUTE | SUB_MUTE;
 	wait(SOUT_PACE_TIME);
 	send_so(0x38800021);								// this is what the IC-901 does... times 2 ???
 	wait(SOUT_PACE_TIME);
@@ -399,8 +400,8 @@ void  process_SIN(U8 cmd){
 		if(got_sin()){
 			sin_data = get_sin();						// get'n check for SIN data
 			if((sin_data & SIN_STOP) == SIN_STOP){		// validate extended "stop" bits
-				sin_time(SIN_ACTIVITY);					// reset activity timer
 				clr_sys_err(NO_B_PRSNT);				// clear LOS error
+				sin_flags &= ~SIN_SINACTO_F;			// clear timeout error
 				if(sin_data & SIN_ADDR){				// process addr == 1 data
 					// ADDR 1
 					if(sin_data != sin_addr1){			// if data is new (different == new)
@@ -420,19 +421,21 @@ void  process_SIN(U8 cmd){
 				}
 			}else{
 				// no (valid) data
-				sprintf(dbuf,"0err = %d, data = 0x%08x", get_error(), sin_data);
+				sprintf(dbuf,"0err = %d, data = 0x%08x, free = %d", get_error(), sin_data, get_free());
 				putsQ(dbuf);
 			}
 		}
-		if(!sin_time(0)){
+		if((!sin_time(0)) && !(sin_flags & SIN_SINACTO_F)){
 			sin_flags |= SIN_SINACTO_F;					// set timeout error if activity timer expires
 														// !!! need to trap this condition and post an error message to LCD
 			set_sys_err(NO_B_PRSNT);
+			flush_sin();								// "It's Saturday night, FLUSH ME K!"
+														// flush and reset the SIN input system
 		}
 		tt = get_error();
 		if(tt != lerr){
 			lerr = tt;
-			sprintf(dbuf,"0err = %d", tt);
+			sprintf(dbuf,"ORerr = %d, free = %d", tt, get_free());
 			putsQ(dbuf);
 		}
 //		print_ptr(); //!!!
@@ -647,6 +650,9 @@ void  save_vfo(U8 b_id){
 	U8	startid;
 	U8	stopid;
 
+/*	if(b_id >= ID1200){
+		putsQ("addr+6");
+	}*/
 	if(b_id == 0xff){
 		startid = 0;
 		stopid = NUM_VFOS;

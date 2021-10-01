@@ -21,6 +21,7 @@
 #include "version.h"
 #include "spi.h"
 #include "lcd.h"
+#include "serial.h"
 
 // ******************************************************************
 // defines
@@ -146,6 +147,7 @@ void spi3_clean(void)
  */
 void open_spi(uint8_t addr)
 {
+//	putchar_bQ('0');
 	TIMER1_CTL_R |= (TIMER_CTL_TBEN);					// enable bit timer
 	GPIO_PORTE_ICR_R = (BUSY_N);						// pre-clear edge flag
 	if(addr){
@@ -168,6 +170,7 @@ void close_spi(void)
 //    wait_reg0(&GPIO_PORTE_DATA_R, BUSY_N, BUSY_WAT);	// wait up for not busy
 	GPIO_PORTD_DATA_R &= ~(CS1 | CS2);					// close all SPI /CS
 	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);					// disable timer
+//	putchar_bQ('1');
 	return;
 }
 
@@ -196,6 +199,7 @@ void lcd_cmd(U8 cdata)
 void open_nvr(void)
 {
 
+//	putchar_bQ('c');
 	TIMER1_CTL_R |= (TIMER_CTL_TBEN);					// enable bit timer
 	GPIO_PORTD_DATA_R &= ~RAMCS_N;						// open NVRAM
 	ssiflag = 0;
@@ -213,6 +217,7 @@ void close_nvr(void)
 	ssiflag = 0;
 	while(!ssiflag);									// hold time (1/2 bit)
 	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);					// disable timer
+//	putchar_bQ('d');
 	return;
 }
 

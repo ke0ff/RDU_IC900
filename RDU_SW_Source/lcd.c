@@ -204,6 +204,8 @@ void process_UI(U8 cmd){
 		process_MS(0xff);												// trigger main/sub process IPL init
 		is_mic_updn(1, 0, 0);											// init mic u/d repeat
 		ptt_change = 0;
+		wait(100);
+		mute_radio(0);
 	}else{
 		//**************************************
 		// process the UI for each of the different modes:
@@ -527,6 +529,7 @@ U8 process_MS(U8 mode){
 			switch(i){													// process scan cancel key presses
 			case VFOchr:
 			case MRchr:
+			case MSchr:
 			case CALLchr:
 			case TONEchr:
 			case MHZchr:
@@ -620,73 +623,77 @@ U8 process_MS(U8 mode){
 				break;
 
 			case MHZchr:												// MHZ button 1st press
-				if(!mhz_time(0)){										// if timer is not zero, one of the MHz modes is active
-					if(maddr == MHZ_OFF){								// this means that the thumbwheel mode isn't active and MHz mode is off
-						maddr = MHZ_ONE;								// set MHz mode
-						amhz(1);										// turn on mhz icon
-					}else{
-						maddr = MHZ_OFF;								// if any other MHz mode active, turn it off
-						amhz(0);										// turn off mhz icon
-					}
-				}else{
-					sii = 1;
-					for(i=0; i<maddr ; i++){							// construct the multiplier for the currently selected digit
-						sii *= 10;
-					}
-					if(maddr == 0) sii = 5;								// lowest digit can only be 0 or 5 (these are all 5KHz stepped radios, except for the UX129 which is a 10 KHz step)
-					set_mhz_step(sii);									// store the step mulitplier
-//					else set_mhz_step(sii / 10L);
-//					i = set_mhz_addr(0xff);
-					if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,0); // un-blink the old digit (m/s)
-					else digblink(maddr,0);
-					if(--maddr == 0xff){								// move the digit and process roll-under
-						if(get_band_index(band_focus) == ID1200_IDX){
-							maddr = 5;
-							set_mhz_step(100000L);
+				if(!(xmode[k] & MC_XFLAG)){								// mem/call, ignore
+					if(!mhz_time(0)){									// if timer is not zero, one of the MHz modes is active
+						if(maddr == MHZ_OFF){							// this means that the thumbwheel mode isn't active and MHz mode is off
+							maddr = MHZ_ONE;							// set MHz mode
+							amhz(1);									// turn on mhz icon
 						}else{
-							maddr = 4;
-							set_mhz_step(10000L);
+							maddr = MHZ_OFF;							// if any other MHz mode active, turn it off
+							amhz(0);									// turn off mhz icon
 						}
+					}else{
+						sii = 1;
+						for(i=0; i<maddr ; i++){						// construct the multiplier for the currently selected digit
+							sii *= 10;
+						}
+						if(maddr == 0) sii = 5;							// lowest digit can only be 0 or 5 (these are all 5KHz stepped radios, except for the UX129 which is a 10 KHz step)
+						set_mhz_step(sii);								// store the step mulitplier
+//						else set_mhz_step(sii / 10L);
+//						i = set_mhz_addr(0xff);
+						if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,0); // un-blink the old digit (m/s)
+						else digblink(maddr,0);
+						if(--maddr == 0xff){							// move the digit and process roll-under
+							if(get_band_index(band_focus) == ID1200_IDX){
+								maddr = 5;
+								set_mhz_step(100000L);
+							}else{
+								maddr = 4;
+								set_mhz_step(10000L);
+							}
+						}
+						if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,1); // blink the new digit (m/s)
+						else digblink(maddr,1);
 					}
-					if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,1); // blink the new digit (m/s)
-					else digblink(maddr,1);
 				}
 				break;
 
 			case MHZchr_H:												// MHZ button, hold (this enters thumbwheel mode)
-				amhz(0);												// turn off mhz icon
-//				set_mhz_addr(0);
-				if(!mhz_time(0)){										// not in thumbwheel mode
-					mhz_time(1);										// start timer
-					set_mhz_step(100000L);								// set start step
-					if(get_band_index(band_focus) == ID1200_IDX){
-						maddr = 5;
-					}else{
-						maddr = 4;
+				if(!(xmode[k] & MC_XFLAG)){								// mem/call, ignore
+					amhz(0);											// turn off mhz icon
+//					set_mhz_addr(0);
+					if(!mhz_time(0)){									// not in thumbwheel mode
+						mhz_time(1);									// start timer
+						set_mhz_step(100000L);							// set start step
+						if(get_band_index(band_focus) == ID1200_IDX){
+							maddr = 5;
+						}else{
+							maddr = 4;
+						}
+						if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,1); // blink the 1st digit (m/s)
+						else digblink(maddr,1);
+						temp_vfo(band_focus);							// copy vfo -> vfot
+					}else{												// already in thumbwheel mode (this will cancel the thumbwheel mode)
+//						i = set_mhz_addr(0xff);
+						if(xmodeq & OFFS_XFLAG){						// offset is differentiated from VFO frequency
+							if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0); // blkin digit off
+							else digblink(maddr&(~MHZ_OFFS),0);
+							mhz_time(0xff);								// clear timers
+							offs_time(0xff);
+							maddr = MHZ_OFF;							// turn off thumbwheel mode
+						}else{
+							if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0);
+							else digblink(maddr&(~MHZ_OFFS),0);
+							copy_vfot(band_focus);						// copy updated temp vfo to normal vfo
+							set_mhz_step(5L);
+							mhz_time(0xff);								// clear timers
+							offs_time(0xff);
+							maddr = MHZ_OFF;
+						}
+						force_push();									// force update to NVRAM
 					}
-					if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,1); // blink the 1st digit (m/s)
-					else digblink(maddr,1);
-					temp_vfo(band_focus);								// copy vfo -> vfot
-				}else{													// already in thumbwheel mode (this will cancel the thumbwheel mode)
-//					i = set_mhz_addr(0xff);
-					if(xmodeq & OFFS_XFLAG){							// offset is differentiated from VFO frequency
-						if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0); // blkin digit off
-						else digblink(maddr&(~MHZ_OFFS),0);
-						mhz_time(0xff);									// clear timers
-						offs_time(0xff);
-						maddr = MHZ_OFF;								// turn off thumbwheel mode
-					}else{
-						if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0);
-						else digblink(maddr&(~MHZ_OFFS),0);
-						copy_vfot(band_focus);							// copy updated temp vfo to normal vfo
-						set_mhz_step(5L);
-						mhz_time(0xff);									// clear timers
-						offs_time(0xff);
-						maddr = MHZ_OFF;
-					}
-					force_push();										// force update to NVRAM
+					b = 2;	// 2beeps
 				}
-				b = 2;	// 2beeps
 				break;
 
 			case Vupchr:												// volume increase, initial press... VOL/SQU commandeer the SRF meters and mem ch digit to display level graphics

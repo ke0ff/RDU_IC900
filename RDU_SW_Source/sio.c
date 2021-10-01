@@ -26,6 +26,7 @@
 #include "sio.h"
 #include "tiva_init.h"
 #include "serial.h"
+#include "radio.h"
 
 //-----------------------------------------------------------------------------
 // local declarations
@@ -34,9 +35,10 @@
 U32	sin_perr;
 U8	sin_error;
 U32	sin_mask;
+U8	sin_hptrm1;
 U8	sin_hptr;
 U8	sin_tptr;
-#define	SIN_MAX	8
+#define	SIN_MAX	10
 U32	sin_buf[SIN_MAX];
 U32	sin_dr;
 
@@ -57,8 +59,10 @@ U32 init_sio(void)
 	sin_error = 0;
 	sin_perr = 0;
 	sin_mask = 0;
+	sin_hptrm1 = 0;
 	sin_hptr = 0;
 	sin_tptr = 0;
+	sin_buf[sin_hptr] = 0;
 
 	// init ssi1 (4800 baud, 32b, async serial out)
 	// with 32 bits (2, 16bit values written into the FIFO one after the other), the SO bitmap is as follows
@@ -183,8 +187,18 @@ char got_sin(void){
 // flush_sin empties the input buffer.
 //-----------------------------------------------------------------------------
 void flush_sin(void){
+	U8	i;	// temp
 
+	GPIO_PORTF_IM_R &= ~(SIN_TTL);					// disable SIN edge and timer intr
+	TIMER2_CTL_R &= ~(TIMER_CTL_TAEN);
+	for(i=0; i<SIN_MAX; i++){						// clear buffer entries
+		sin_buf[i] = 0;
+	}
+	sin_hptr = 0;
+	sin_hptrm1 = 0;
 	sin_tptr = sin_hptr;							// make tail == head,
+	GPIO_PORTF_ICR_R = (SIN_TTL);					// clear int flags
+	GPIO_PORTF_IM_R |= (SIN_TTL);					// enable SIN edge intr
 	return;
 }
 
@@ -243,9 +257,12 @@ void gpiof_isr(void){
 
 void Timer2A_ISR(void)
 {
+	U32	i;		// temp
 
-	if(sin_hptr >= SIN_MAX){
+	if(sin_hptr >= SIN_MAX){									// failsafe countermeasure
 		sin_hptr = 0;
+		sin_hptrm1 = 0;
+		sin_buf[sin_hptr] = 0;
 	}
 	if(TIMER2_MIS_R & TIMER_MIS_TATOMIS){
 		TIMER2_TAILR_R = (uint16_t)(SIN_BIT_TIME);
@@ -264,10 +281,16 @@ void Timer2A_ISR(void)
 				sin_dr |= sin_mask;								// capture a 1
 			}
 			sin_mask >>= 1;
-			if(sin_mask == 0x8000L){
-				sin_buf[sin_hptr++] = sin_dr | 0xffffL;
-				if(sin_hptr >= SIN_MAX) sin_hptr = 0;
-				if(sin_hptr == sin_tptr) sin_perr++;
+			if(sin_mask == 0x4000L){
+				i = sin_dr | 0x7fffL;							// set data for storage
+				if(sin_buf[sin_hptrm1] != i){					// if new data is different from last word, store it
+					sin_buf[sin_hptr++] = i;
+					if(sin_hptr >= SIN_MAX) sin_hptr = 0;
+					if(sin_hptr == sin_tptr) sin_perr++;
+					sin_hptrm1++;
+					if(sin_hptrm1 >= SIN_MAX) sin_hptrm1 = 0;
+				}
+				sin_time(SIN_ACTIVITY);							// reset activity timer
 				TIMER2_CTL_R &= ~(TIMER_CTL_TAEN);				// disable timer
 				GPIO_PORTF_ICR_R = (SIN_TTL);					// clear int flags
 				GPIO_PORTF_IM_R |= (SIN_TTL);					// enable SIN edge intr

@@ -39,6 +39,7 @@
 //#define XTAL_FREQ	SYSCTL_RCC_XTAL_16MHZ	// set value of external XTAL
 #define XTAL_FREQ	SYSCTL_RCC_XTAL_20MHZ	// set value of external XTAL
 #define SYSCLK	(50000000L)			// sysclk freq (bus clk)
+//#define SYSCLK	(66667000L)			// sysclk freq (bus clk)
 #else
 #define XTAL 0
 #define SYSCLK	PIOCLK				// sysclk freq (bus clk) same as PIOCLK
@@ -104,7 +105,7 @@
 #define TIMER3_PS 32
 
 #define TIMER1B_PS 		1			// prescale value for timer1B
-#define	BBSPICLK_FREQ	400000L		// edge freq for BB SPI clk
+#define	BBSPICLK_FREQ	600000L		// edge freq for BB SPI clk
 
 #define	TPULSE	(100L)				// in usec
 #define TMIN	(((SYSCLK / 100) * TPULSE)/10000L)	// minimum pulse width
@@ -388,6 +389,7 @@ U8 mute_time(U8 tf);
 U8 ts_time(U8 tf);
 U8 slide_time(U8 tf);
 U8 scan_time(U8 focus, U8 tf);
+U32 get_free(void);
 
 void set_beep(U16 beep_frq, U16 b_count);
 void do_beep(U16 beep_cycles);
