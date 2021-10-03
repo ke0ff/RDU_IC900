@@ -14,6 +14,9 @@
  *  Project scope rev notes:
  *    				 To-do Checklist time!
  *    				 !!! there is a noticable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
+ *    				 !!! Need to come up wit a re-start sequence without power cycling if the BERR is resolved.
+ *    				 !!! mem scan needs to disable string disp mode...
+ *    				 !!! "LOW" annunc needs to follow focus...
  *
  *    				 * test band switching (VFO button)
  *    				 * SET loop:
@@ -24,9 +27,15 @@
  *
  *
  *    Project scope rev History:
- *    09-30-21 jmh:	 Modified SIN interrupt to ignore input data if it is the same as the last data.  Resets the activity timer in that interrupt now.
- *    				 process_SIN only executes BERR code once now.  !!! Need to come up wit a re-start sequence without power cycling if the BERR
- *						is resolved.
+ *    10-03-21 jmh:	 mem scan: corrected 2 issues, 1) if scan start stepped to a masked channel with activity, the system would stick on it until
+ *    					the activity went silent, or the scan was stopped.  2) Scan start would keep pulsing mem channel after the button hold time.
+ *    				 Added long scan time to COS active case to allow scan to dwell a bit after LOS (right now, it is 1 sec).
+ *    				 Began to add mem-string support.  "MHZ" pressed in mem mode will toggle string display.
+ *    				 Added "MSTR" CLI command to program and interrogate mem strings.
+ *    				 Added "long" pause to LOS dwell in mem scan (matches IC-901 mem scan behavior).
+ *    10-02-21 jmh:	 process_SOUT(): added "last" vol/squ registers and code to only update once.  Gets rid of "pfft-pfft-pfft..." noise when one
+ *    					band is scanning and the other band has a quieted open-squelch.
+ *    				 Did some rework to the module present boot sequence to improve reliability.
  *    09-29-21 jmh:	 Discovered SIN overruns due to BBSPI implementation eating up too much cycle time in the process loop. Increased BBSPI clock rate
  *    					to compensate.  Seems to help, but there is still a lot of time spent in the SPI routines.  Need to further investigate
  *    					options to reduce LCD traffic.  Same for NVRAM traffic.
@@ -281,6 +290,7 @@ S8		xoffsent;						// xoff sent
 U32		abaud;							// 0 = 115.2kb (the default)
 U8		iplt2;							// timer2 ipl flag
 U16		waittimer;						// gp wait timer
+U16		waittimer2;						// gp wait timer
 U8		dialtimer;						// dial debounce wait timer
 U8		sintimer;						// sin activity timer
 U8		souttimer;						// sout pacing timer
@@ -922,15 +932,32 @@ void waitpio(U16 waitms){
 //-----------------------------------------------------------------------------
 // wait() uses a dedicated ms timer to establish a defined delay (+/- 1LSB latency)
 //-----------------------------------------------------------------------------
-void wait(U16 waitms)
-{
+void wait(U16 waitms){
 //	U32	i;
 
 //	i = 545L * (U32)waitms;
-    waittimer = waitms;
+    waittimer2 = waitms;
 //    for(;i!=0;i--);		// patch
-    while(waittimer != 0);
+    while(waittimer2 != 0);
     return;
+}
+
+//-----------------------------------------------------------------------------
+// set_wait() uses a dedicated ms timer to establish a defined delay (+/- 1LSB latency)
+// is_wait() returns status of wait timer
+//-----------------------------------------------------------------------------
+void set_wait(U16 waitms){
+
+    waittimer2 = waitms;
+    return;
+}
+
+U8 is_wait(void){
+	U8	i;	// rtrn
+
+    if(waittimer2) i = 1;
+    else i = 0;
+    return i;
 }
 
 //-----------------------------------------------------------------------------
@@ -1354,7 +1381,7 @@ U8 slide_time(U8 tf){
 
 //-----------------------------------------------------------------------------
 // scan_time() sets/reads the scan rate timer
-//	(tf == 0 reads, 1 sets, 0xff clears)
+//	(tf == 0 reads, 1 sets, 2 sets long, 0xff clears)
 //-----------------------------------------------------------------------------
 U8 scan_time(U8 focus, U8 tf){
 	U8	i = 0;		// temp
@@ -1365,6 +1392,8 @@ U8 scan_time(U8 focus, U8 tf){
 		}else{
 			if(tf == 1){
 				scanmtimer = SCAN_TIME;
+			}else{
+				if(tf == 2) scanmtimer = SCAN_TIME2;
 			}
 		}
 		if(scanmtimer) i = TRUE;
@@ -1374,6 +1403,8 @@ U8 scan_time(U8 focus, U8 tf){
 		}else{
 			if(tf == 1){
 				scanstimer = SCAN_TIME;
+			}else{
+				if(tf == 2) scanstimer = SCAN_TIME2;
 			}
 		}
 		if(scanstimer) i = TRUE;
@@ -1671,6 +1702,9 @@ static	U16	key_last;				// last key
 		}
 		if (waittimer != 0){								// update wait timer
 			waittimer--;
+		}
+		if (waittimer2 != 0){								// update wait timer
+			waittimer2--;
 		}
 		if (sintimer != 0){									// update sin activity timer
 			sintimer--;

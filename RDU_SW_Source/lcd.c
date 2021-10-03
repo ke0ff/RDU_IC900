@@ -77,14 +77,15 @@ U8	maddr;							// mhz digit mode composite digit address and mode flags registe
 U8	vfo_display;					// display update signal.  This is band (MAIN/SUB) to update or'd with 0x80 to trigger
 U8	xmode[ID1200];					// xmode flags track mem/call modes
 U8	xmodeq;							// xmodeq tracks transient adjust modes (vol, squ, tone, offs)
+U8	xmodez;							// xmodez tracks first-scan enabled flags
 U8	chkmode;						// indicates check/rev mode is in effect
 U8	chksqu;							// save reg for check squelch
 U8	mute_mode;						// main/sub mute status
 U8	tsdisplay;						// ts display flag
 U8	sys_err;						// system error flags.  0x00 = no errors
 U8	ptt_change;						// PTT changed flag (from radio.c)
-char mfbuf[8];						// ascii text (freq field) buffer, main
-char sfbuf[8];						// ... sub
+char mfbuf[16];						// ascii text (freq field) buffer, main
+char sfbuf[16];						// ... sub
 
 //-----------------------------------------------------------------------------
 // Local Fn Declarations
@@ -350,7 +351,9 @@ void update_lcd(U8 focus){
 			mema(SUB, 0);													// turn off "M"
 			mskpa(SUB, 1);													// "skp" annunc = off
 		}
-		sfreq(get_freq(SUB), 0);
+		if(!(xmodeq & TEXTS_SLIDE)){
+			sfreq(get_freq(SUB), 0);
+		}
 	}
 	return;
 }	// end update_lcd()
@@ -431,14 +434,14 @@ U8 process_MS(U8 mode){
 				// update RX LEDs
 				if((sin_a0 & SIN_SQSA) && !(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT))){
 					GPIO_PORTC_DATA_R |= MRX_N;							// main led = on
-					scan_time(MAIN, 1);									// reset scan timer
+					scan_time(MAIN, 2);									// reset scan timer
 				}else{
 					GPIO_PORTC_DATA_R &= ~MRX_N;						// main led = off
 				}
 				if(sin_a0 & SIN_SQSB && !(sys_err & (NO_B_PRSNT|NO_SUX_PRSNT))){
 					// sub led
 					GPIO_PORTC_DATA_R |= SRX_N;							// sub led = on
-					scan_time(SUB, 1);									// reset scan timer
+					scan_time(SUB, 2);									// reset scan timer
 				}else{
 					GPIO_PORTC_DATA_R &= ~SRX_N;						// sub led = off
 				}
@@ -532,9 +535,10 @@ U8 process_MS(U8 mode){
 			case MSchr:
 			case CALLchr:
 			case TONEchr:
-			case MHZchr:
 			case DUPchr:
 			case SETchr:
+				set_slide(band_focus, 0);
+			case MHZchr:
 				doscan(band_focus, 0);
 				break;
 
@@ -611,7 +615,11 @@ U8 process_MS(U8 mode){
 					k = get_band_index(band_focus);						// reset focus pointer
 					i = get_lohi(band_focus, 0xff);
 					update_lcd(SUB);
-					update_radio_all(SUB_ALL);
+					if(xmodeq & TEXTS_SLIDE){
+						update_radio_all(SUB_VQ);						// don't update freq if slider operating
+					}else{
+						update_radio_all(SUB_ALL);						// update all
+					}
 /*					if(i){												// HILO updates based on focus
 						alow(1);
 					}else{
@@ -623,7 +631,7 @@ U8 process_MS(U8 mode){
 				break;
 
 			case MHZchr:												// MHZ button 1st press
-				if(!(xmode[k] & MC_XFLAG)){								// mem/call, ignore
+				if(!(xmode[k] & MC_XFLAG)){								// if in mem/call mode, go to string slide mode check...
 					if(!mhz_time(0)){									// if timer is not zero, one of the MHz modes is active
 						if(maddr == MHZ_OFF){							// this means that the thumbwheel mode isn't active and MHz mode is off
 							maddr = MHZ_ONE;							// set MHz mode
@@ -655,6 +663,18 @@ U8 process_MS(U8 mode){
 						if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,1); // blink the new digit (m/s)
 						else digblink(maddr,1);
 					}
+				}else{
+					// toggle mem string disp mode
+					set_slide(band_focus, 0xff);
+/*					if(band_focus == MAIN){
+						if(xmodeq & TEXTM_SLIDE) xmodeq &= ~TEXTM_SLIDE;
+						else xmodeq |= TEXTM_SLIDE;
+						vfo_display |= MAIN;
+					}else{
+						if(xmodeq & TEXTS_SLIDE) xmodeq &= ~TEXTS_SLIDE;
+						else xmodeq |= TEXTS_SLIDE;
+						vfo_display |= SUB_D;
+					}*/
 				}
 				break;
 
@@ -1060,10 +1080,17 @@ void process_VFODISP(U8 focus){
 
 	if(vfo_display){
 		// calculate display mode for switch() frame:				// This makes it easier to maintain the VFO display modes (now and future)
-		if(xmodeq & (TONE_XFLAG|OFFS_XFLAG)) j = TONE_DISP;
-		else if(tsdisplay) j = TS_DISP;
-		     else if(xmodeq & (TEXTM_SLIDE|TEXTS_SLIDE)) j = TXTSLID_DISP;
-			      else j = NORM_DISP;
+		if(xmodeq & (TONE_XFLAG|OFFS_XFLAG)){
+			j = TONE_DISP;
+		}else{
+			if(tsdisplay){
+				j = TS_DISP;
+			}else{
+				if(focus == MAIN) i = TEXTM_SLIDE;
+				else i = TEXTS_SLIDE;
+				if(!(xmodeq & i)) j = NORM_DISP;
+			}
+		}
 		// dispatch switch() - each "case" is a display mode
 		switch(j){
 		case TONE_DISP:
@@ -1129,27 +1156,32 @@ void process_VFODISP(U8 focus){
 				vfo_display &= ~(VMODE_ISTX | MAIN);*/
 			}else{
 				if(vfo_display & SUB_D){
-					sfreq(get_freq(SUB), 0);					// update sub freq display
+					if(!(xmodeq & TEXTS_SLIDE)){
+						sfreq(get_freq(SUB), 0);
+					}
+//					sfreq(get_freq(SUB), 0);					// update sub freq display
 					vfo_display &= ~(SUB_D);
 				}
 			}
 			break;
 
 		case TXTSLID_DISP:
-			// text slider display mode
-			if(!slide_time(0)){
-				if(xmodeq & TEXTM_SLIDE){
-					i = puts_slide(MAIN, get_nameptr(MAIN), 0);
-				}
-				if(xmodeq & TEXTS_SLIDE){
-					i = puts_slide(SUB, get_nameptr(SUB), 0);
-				}
-				slide_time(1);
-			}
 			break;
 
 		default:
 			break;
+		}
+	}
+	if(xmodeq & (TEXTM_SLIDE | TEXTS_SLIDE)){					// update main/sub slider displays
+		// text slider display mode - always runs
+		if(!slide_time(0)){
+			if(xmodeq & TEXTM_SLIDE){
+				i = puts_slide(MAIN, get_nameptr(MAIN), 0);
+			}
+			if(xmodeq & TEXTS_SLIDE){
+				i = puts_slide(SUB, get_nameptr(SUB), 0);
+			}
+			slide_time(1);
 		}
 	}
 	return;
@@ -1363,10 +1395,12 @@ U32 process_DIAL(U8 focus){
 	if(j){
 		if((xmodeq & MSCANM_XFLAG) && (focus == MAIN)){
 			doscan(MAIN, 0);
+			set_slide(focus, 0);
 			return rflags;
 		}
 		if((xmodeq & MSCANS_XFLAG) && (focus == SUB)){
 			doscan(SUB, 0);
+			set_slide(focus, 0);
 			return rflags;
 		}
 		if(focus == SUB){
@@ -1402,7 +1436,7 @@ U32 process_DIAL(U8 focus){
 			if(j){
 				// if focus and mem mode == active:
 				if(xmode[k] & (MC_XFLAG)){
-					// inc/dec mem/call#
+					// mem/call# inc/dec
 					if(focus == MAIN){
 						if(xmode[k] & CALL_XFLAG){
 							get_callnum(focus, j);
@@ -1430,6 +1464,7 @@ U32 process_DIAL(U8 focus){
 					else i = SUB_ALL;
 					update_radio_all(i);
 				}else{
+					// main freq update
 					if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
 						// MHZ (No thumbwheel) mode:
 						i = add_vfo(focus, j, maddr);					// update vfo
@@ -1469,13 +1504,16 @@ U32 process_DIAL(U8 focus){
 				if(xmodeq & MSCANM_XFLAG){
 					if(GPIO_PORTD_DATA_R & MTX_N){						// PTT active
 						doscan(MAIN, 0);								// shut down scan
+						set_slide(MAIN, 0);
 						do_1beep();
 					}else{
-						if(!(GPIO_PORTC_DATA_R & MRX_N)){				// main COS inactive
-							if(!scan_time(MAIN, 0)){
+						if(!(GPIO_PORTC_DATA_R & MRX_N) || (xmodez & MSCANM1_XFLAG)){ // main COS inactive or 1st scan
+							if(!scan_time(MAIN, 0) || (xmodez & MSCANM1_XFLAG)){
 								// process if scan timer == 0
+								xmodez &= ~MSCANM1_XFLAG;
 								if(!nxtscan(MAIN, 1)){
 									doscan(MAIN, 0);					// shut down scan, no mems enabled
+									set_slide(MAIN, 0);
 									do_3beep();
 								}else{
 									scan_time(MAIN, 1);					// reset scan timer
@@ -1491,11 +1529,13 @@ U32 process_DIAL(U8 focus){
 				}
 				// sub mem scan...
 				if(xmodeq & MSCANS_XFLAG){
-					if(!(GPIO_PORTC_DATA_R & SRX_N)){					// sub COS inactive
-						if(!scan_time(SUB, 0)){
+					if(!(GPIO_PORTC_DATA_R & SRX_N) || (xmodez & MSCANS1_XFLAG)){					// sub COS inactive
+						if(!scan_time(SUB, 0) || (xmodez & MSCANS1_XFLAG)){
 							// process if scan timer == 0
+							xmodez &= ~MSCANS1_XFLAG;
 							if(!nxtscan(SUB, 1)){
 								doscan(SUB, 0);							// shut down scan, no mems enabled
+								set_slide(SUB, 0);
 								do_3beep();
 							}else{
 								scan_time(SUB, 1);						// reset scan timer
@@ -2747,6 +2787,7 @@ U8 doscan(U8 focus, U8 tf){
 	if(focus == MAIN){
 		if(tf){
 			xmodeq |= MSCANM_XFLAG;
+			xmodez |= MSCANM1_XFLAG;
 		}else{
 			xmodeq &= ~MSCANM_XFLAG;
 		}
@@ -2761,6 +2802,7 @@ U8 doscan(U8 focus, U8 tf){
 	}else{
 		if(tf){
 			xmodeq |= MSCANS_XFLAG;
+			xmodez |= MSCANS1_XFLAG;
 		}else{
 			xmodeq &= ~MSCANS_XFLAG;
 		}
@@ -2812,4 +2854,72 @@ void set_ptt(U8 pttstat){
 
 	ptt_change = pttstat | PTT_EDGE;
 	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_slide() sets slide mode or toggles
+//	0 = turn off, 1 = turn on, 0xff = toggle
+//-----------------------------------------------------------------------------
+void set_slide(U8 focus, U8 tf){
+
+	// toggle mem string disp mode
+	if(focus == MAIN){
+		switch(tf){
+		default:
+		case 0:
+			xmodeq &= ~TEXTM_SLIDE;
+			break;
+
+		case 1:
+			xmodeq |= TEXTM_SLIDE;
+			break;
+
+		case 0xff:
+			if(xmodeq & TEXTM_SLIDE) xmodeq &= ~TEXTM_SLIDE;
+			else xmodeq |= TEXTM_SLIDE;
+			break;
+		}
+		vfo_display |= MAIN;
+	}else{
+		switch(tf){
+		default:
+		case 0:
+			xmodeq &= ~TEXTS_SLIDE;
+			break;
+
+		case 1:
+			xmodeq |= TEXTS_SLIDE;
+			break;
+
+		case 0xff:
+			if(xmodeq & TEXTS_SLIDE) xmodeq &= ~TEXTS_SLIDE;
+			else xmodeq |= TEXTS_SLIDE;
+			break;
+		}
+		vfo_display |= SUB_D;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// mem2ordinal() returns ordinal of ASCII mem#.
+//-----------------------------------------------------------------------------
+U8 mem2ordinal(char cm){
+	U8	i;		// temp
+
+	i=0;
+	while((i<sizeof(mem_ordinal)) && (cm != mem_ordinal[i])){
+		i++;
+	}
+	if(i >= sizeof(mem_ordinal)) i = 0xff;				// err exit
+	return i;
+}
+
+//-----------------------------------------------------------------------------
+// ordinal2mem() returns ASCII mem# of ordinal.
+//-----------------------------------------------------------------------------
+char ordinal2mem(U8 memnum){
+
+	if(memnum >= NUM_MEMS) return '!';						// err exit
+	return mem_ordinal[memnum];
 }

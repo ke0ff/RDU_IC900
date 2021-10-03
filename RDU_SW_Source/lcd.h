@@ -52,6 +52,10 @@
 #define	MSCANM_XFLAG	0x40		// mem scan active flags (M/S)
 #define	MSCANS_XFLAG	0x80
 
+// Xz-flags
+#define	MSCANM1_XFLAG	0x40		// mem scan first active flags (M/S)
+#define	MSCANS1_XFLAG	0x80
+
 // XMODE flags
 #define	MEM_XFLAG		0x10
 #define	CALL_XFLAG		0x20
@@ -240,3 +244,6 @@ U8 puts_slide(U8 focus, char* sptr, U8 cmd);
 U8 doscan(U8 focus, U8 tf);
 U8 get_xmodeq(void);
 void set_ptt(U8 pttstat);
+void set_slide(U8 focus, U8 tf);
+U8 mem2ordinal(char cm);
+char ordinal2mem(U8 memnum);

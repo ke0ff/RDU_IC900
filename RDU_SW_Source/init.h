@@ -18,6 +18,7 @@
 #define INIT_H
 #endif
 
+#define	DEBUG 1
 //#define	USE_QSPI 1
 
 //////////////////////////////////////////////////////////////////////////////////////
@@ -74,6 +75,7 @@
 #define	REG_WAIT_DLY 200			// 200ms wait limit for register action
 #define RESP_SAMP SEC100MS			// sets resp rate
 #define	SOUT_PACE_TIME	9			// 33/4800 s for one SOUT msg
+#define	SIN_PACE_TIME	50			// wait a little over 2 word times (2 x 32/4800 s for one SIN word)
 
 // ssi bit rate defns
 // BR = SYSCLK/(CPSR * (1 + SCR))
@@ -355,6 +357,8 @@ uint8_t rdhib_ram(U8 addr);
 
 void waitpio(U16 waitms);
 void wait(U16 waitms);
+void set_wait(U16 waitms);
+U8 is_wait(void);
 void wait2(U16 waitms);
 U16 getipl(void);
 U32 get_syserr(U8 opr);

@@ -281,15 +281,15 @@ void Timer2A_ISR(void)
 				sin_dr |= sin_mask;								// capture a 1
 			}
 			sin_mask >>= 1;
-			if(sin_mask == 0x4000L){
-				i = sin_dr | 0x7fffL;							// set data for storage
-				if(sin_buf[sin_hptrm1] != i){					// if new data is different from last word, store it
+			if(sin_mask == 0x2000L){
+				i = sin_dr | 0x3fffL;							// set data for storage
+//				if(sin_buf[sin_hptrm1] != i){					// if new data is different from last word, store it
 					sin_buf[sin_hptr++] = i;
 					if(sin_hptr >= SIN_MAX) sin_hptr = 0;
 					if(sin_hptr == sin_tptr) sin_perr++;
-					sin_hptrm1++;
-					if(sin_hptrm1 >= SIN_MAX) sin_hptrm1 = 0;
-				}
+//					sin_hptrm1++;
+//					if(sin_hptrm1 >= SIN_MAX) sin_hptrm1 = 0;
+//				}
 				sin_time(SIN_ACTIVITY);							// reset activity timer
 				TIMER2_CTL_R &= ~(TIMER_CTL_TAEN);				// disable timer
 				GPIO_PORTF_ICR_R = (SIN_TTL);					// clear int flags

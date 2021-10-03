@@ -58,12 +58,12 @@ enum err_enum{ no_response, no_device, target_timeout };
 // enum list of command numerics
 //	each enum corresponds to a command from the above list (lastcmd corresponds
 //	with the last entry, 0xff)
-//                                                           1     1   1   1   1  1     1   1  1  2  2
-//                        0  1  2  3   4   5  6  7  8  9  0  1     2   3   4   5  6     7   8  9  0  1
-const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0NR\0NW\0NC\0U\0SCAN\0TI\0T\0?\0H\0VERS\0\xff"};
-//             0      1       2       3       4       5       6      7       8       9       10       11   12   13   14    15       16
-enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,
-//             17        18      19    20    21
+//                                                           1     1     1   1   1  1     1   1  1  2  2   2
+//                        0  1  2  3   4   5  6  7  8  9  0  1     2     3   4   5  6     7   8  9  0  1   2
+const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0TI\0T\0?\0H\0VERS\0\xff"};
+//             0      1       2       3       4       5       6      7       8       9       10       11   12   13   14   15    16       17
+enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,
+//             18        19      20    21    22
 			   timer_tst,trig_la,help1,help2,vers,lastcmd,helpcmd };
 
 #define	cmd_type	char	// define as char for list < 255, else define as int
@@ -124,6 +124,15 @@ U8	lcd_init_L6[] = { 0x82, 0xfd, 0xb0 };
 const char un_ary[] = { "RDU-900,ke0ff\0\0\0" };					// init User SN string
 const char teststr[] = { "THIS IS KE0FF " };							// test string
 
+char	band_str[6][5] = {
+		{"10m \0"},
+		{"6m  \0"},
+		{"2m  \0"},
+		{"220 \0"},
+		{"440 \0"},
+		{"1296\0"}
+};
+
 //=============================================================================
 // local Fn declarations
 
@@ -176,11 +185,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 	U8		i;						// temp
 	U8		j;						// temp
 	U8		l;						// temp
-	U8		m;						// temp
 //	U8*		ptr0;					// U8 mem pointer
-	U8		dbuf[10];				// U8 disp buf
-	S8		si;						// temp s
-	S8		sj;
 	U16		k;						// U16 temp
 	U16		kk;						// U16 temp
 //	U16		hh;						// U16 temp
@@ -192,8 +197,15 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 //	volatile uint32_t* pii;					// u32 pointer
 //	S32		si;
 	float	fa;
+	char	gp_buf[20];				// gen-purpose buffer
+
+#ifdef DEBUG
+	U8		m;						// temp
+	U8		dbuf[10];				// U8 disp buf
+	S8		si;						// temp s
+	S8		sj;
 	float	fb;
-	char	gp_buf[16];				// gen-purpose buffer
+#endif
 
 	bchar = '\0';																// clear global escape
     if (nargs > 0){
@@ -276,6 +288,39 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					dispSWvers();
 					break;
 
+				case mstr:														// mem string: p[0] = band+1, p[1] = mem#, p[2] = string
+					params[0] = 0;
+					params[1] = 0;
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
+					if(--params[0] > 5) params[1] = MAX_MEM;
+					if(params[1] < MAX_MEM){
+						ii = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR;			// band/mem#
+						if(args[3][0] != '\0'){									// copy new string to NVRAM
+							j = CS_WRITE | CS_OPEN;
+							for(i=0; i<MEM_NAME_LEN; i++){
+								if(i == (MEM_NAME_LEN - 1)) j = CS_WRITE | CS_CLOSE;
+								gp_buf[i] = rw8_nvr(ii, args[3][i], j);
+								j = CS_WRITE;
+							}
+						}
+						j = CS_READ | CS_OPEN;									// read NVRAM
+						for(i=0; i<MEM_NAME_LEN; i++){
+							if(i == (MEM_NAME_LEN - 1)) j = CS_READ | CS_CLOSE;
+							gp_buf[i] = rw8_nvr(ii, 0, j);
+							j = CS_READ;
+						}
+						if(params[1] < MAX_MEM){
+							sprintf(obuf,"MEM String, %s: #: %c, '%s'\n", band_str[params[0]], ordinal2mem(params[1]), gp_buf);
+							putsQ(obuf);
+						}else{
+							putsQ("!Error!");
+						}
+					}else{
+						putsQ("!Error!");
+					}
+					break;
+
 				case beeper:													// beeper test
 					putsQ("beep\n");
 					params[0] = 0;
@@ -318,6 +363,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							}while(i--);
 						}
 					}else{
+#ifdef DEBUG
 						putsQ("SIN capture...");
 						jj = 0;
 						i = 75;
@@ -336,6 +382,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 								}
 							}
 						}while(bchar != ESC);
+#endif
 					}
 					break;
 
@@ -438,6 +485,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					break;
 
 				case kp_data:													// debug, disp T3 capture buf
+#ifdef DEBUG
 					sprintf(obuf,"get key data: %08x",ii);
 					putsQ(obuf);
 					do{
@@ -446,6 +494,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						}
 					}while(bchar != ESC);
 					putsQ("\n");
+#endif
 					break;
 
 				case tst_att:
@@ -456,6 +505,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					break;
 
 				case timer_tst:
+#ifdef DEBUG
 					params[1] = 0;
 					get_Dargs(1, nargs, args, params);			// parse param numerics into params[] array
 					if(params[1] == 1){
@@ -470,6 +520,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					}while(bchar != ESC);
 					sprintf(obuf,"PortB: %02x",GPIO_PORTB_DATA_R);
 					putsQ(obuf);
+#endif
 					break;
 
 				case tst_pwm:
@@ -572,6 +623,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 
 				case tst_freq:
 					if(ps){
+#ifdef DEBUG
 						puts_slide(SUB, (char*)teststr, 1);
 						i = 0;
 						do{
@@ -585,6 +637,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 								putsQ("slid");
 							}
 						}while(bchar != ESC);
+#endif
 					}else{
 						jj = 0;
 						ii = 670L;
@@ -632,6 +685,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							putsQ(obuf);
 						}
 					}else{
+#ifdef DEBUG
 						// if "C", display milti-line (until ESC)
 						do{														// display ascii version of msg
 							ip = adc_buf;
@@ -657,6 +711,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							}
 							waitpio(100);
 						}while(bchar != ESC);
+#endif
 					}
 					break;
 
@@ -696,6 +751,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					break;*/
 
 				case tst_enc:													// pwr-off (sleep)
+#ifdef DEBUG
 					putsQ("DIAL Debug (ESC to exit):");
 					set_dial(0);
 					sj = 1;
@@ -744,9 +800,11 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							putsQ(obuf);
 						}
 					}while(bchar != ESC);*/
+#endif
 					break;
 
 				case tstuart1:													// HOST MEM WR CMD
+#ifdef DEBUG
 					// Test Uart0:  TSTU0 ?/<string>/W to loop
 					ii = 1;
 					putsQ("UART0 (ACU) loop test.");
@@ -776,9 +834,11 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						}
 					}while(pw && (bchar != ESC));								// if "W" for loop, repeat until ESC
 					if(pw) putsQ("");
+#endif
 					break;
 #define	deelay	5
 				case trig_la:												// LCD debug trigger
+#ifdef DEBUG
 					putsQ("LCD CMD line (ESC to exit)...\n");
 					bchar = 0;
 					l = 0x41;
@@ -1042,6 +1102,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					}while(bchar != ESC);		*/							// repeat until ESC
 					sprintf(obuf,"Done.\n");
 					putsQ(obuf);
+#endif
 					break;
 
 				case dis_la:												// disarm (stop) analyzer

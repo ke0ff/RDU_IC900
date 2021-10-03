@@ -139,7 +139,13 @@ U8	pll_ptr;							// pll_buf index
 
 // reset units
 #define	SO_INIT_LENA	2
-U32	so_inita[] = { 0x00000000, 0x3F000818 };
+U32	so_inita[] = { 0x00000000,
+				   0x3F000818,
+				   0x3D220050, 					// squ left (main)
+				   0x3D020048,					// squ right
+				   0x3E201050,					// vol left	(main)
+				   0x3E001048,					// vol right
+				 };
 
 // sout data to scan for installed UX units
 #define	SO_INIT_LENB	7
@@ -176,21 +182,33 @@ void init_radio(void){
 	U8	usnbuf[16];		// User SN buffer
 //	char	ibuf[25];	// sprintf/putsQ debug patch !!!
 
-	wait(100);
+	wait(50);
 	// send init array 1 (reset)
 	for(i=0; i<SO_INIT_LENA; i++){						// do base module reset
 		send_so(so_inita[i]);
-		wait(SOUT_PACE_TIME);
+		wait(SIN_PACE_TIME);
 	}
 	// send init array 2 (UX module query)
 	ux_present_flags = 0;								// start with no modules
 	flush_sin();										// clear SIN buffer
-	for(i=0, j=0x01; i<SO_INIT_LENB; i++, j<<=1){
+	wait(15);
+	putsQ("UXsch:");
+	for(i=0, j=0x01; i<(SO_INIT_LENB-1); i++, j<<=1){
 		send_so(so_initb[i]);							// send a query message to each possible module
-		wait(SOUT_PACE_TIME);
-		if(get_busy()){
-			ux_present_flags |= j;						// and set the present flag if the busy bit is active
-		}
+		set_wait(20);
+		do{
+			k = get_busy();								// clean out input buffer after module select
+		}while(is_wait());
+//		putchar_bQ('0'); //!!! debug
+		set_wait(SIN_PACE_TIME);
+		k = 0;
+		do{								// look for module present
+			if(get_busy() == 1){
+//				putchar_bQ('1'); //!!! debug
+				ux_present_flags |= j;					// and set the present flag if the busy bit is active
+				k = 1;									// break out
+			}
+		}while(is_wait() && !k);
 	}
 	ux_present_flags &= IDALL_B;						// mask known modules
 	// !!! need to trap exceptions here if only 1 or no modules present
@@ -375,6 +393,9 @@ void init_radio(void){
 	wait(SOUT_PACE_TIME);
 	send_so(0x38800021);
 	wait(SOUT_PACE_TIME);
+	putssQ("UX Installed: 0x");
+	puthexQ(ux_present_flags);
+	putsQ(" ");
 	return;
 }
 
@@ -456,6 +477,10 @@ U8 process_SOUT(U8 cmd){
 			U8	k = 0;
 	static	U8	xit_count;		// used to mechanize UX-129 XIT/RIT adjustment sequences
 	static	U8	xit_dir;
+	static	U8	last_mvol;
+	static	U8	last_msqu;
+	static	U8	last_svol;
+	static	U8	last_ssqu;
 			U32 ii;
 			U32* pptr;			// pointer into SOUT buffer
 //			char dgbuf[30];		// !!! debug sprintf/putsQ buffer
@@ -465,6 +490,10 @@ U8 process_SOUT(U8 cmd){
 		sout_time(0);								// initialize timer and statics
 		xit_count = 0;
 		xit_dir = 0;
+		last_mvol = 0xff;							// force initial update of vol/squ
+		last_msqu = 0xff;
+		last_svol = 0xff;
+		last_ssqu = 0xff;
 //		sout_flags = 0;
 	}else{											// normal (run) branch
 		if(pll_ptr == 0xff){
@@ -542,10 +571,13 @@ U8 process_SOUT(U8 cmd){
 							}else{
 								i = vol_m;
 							}
-							pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
-							pll_ptr = 0;
+							if(i != last_mvol){
+								last_mvol = i;
+								pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
+								pll_ptr = 0;
+								pll_buf[1] = 0xfffffffeL;									// set to confirm mute
+							}
 							sout_flags &= ~SOUT_MVOL_F;									// clear signal flag
-							pll_buf[1] = 0xfffffffeL;									// set to confirm mute
 							break;
 
 						case SOUT_SVOL_N:
@@ -554,24 +586,35 @@ U8 process_SOUT(U8 cmd){
 							}else{
 								i = vol_s;
 							}
-							pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
-							pll_ptr = 0;
+							if(i != last_svol){
+								last_svol = i;
+								pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
+								pll_ptr = 0;
+								pll_buf[1] = 0xfffffffeL;								// set to confirm mute
+							}
 							sout_flags &= ~SOUT_SVOL_F;									// clear signal flag
-							pll_buf[1] = 0xfffffffeL;									// set to confirm mute
 							break;
 
 						case SOUT_MSQU_N:
-							pll_buf[0] = atten_calc(vfo_p[bandid_m].sq) | ATTEN_MAIN | SQU_ADDR;
-							pll_ptr = 0;
+							i = vfo_p[bandid_m].sq;
+							if(i != last_msqu){
+								last_msqu = i;
+								pll_buf[0] = atten_calc(i) | ATTEN_MAIN | SQU_ADDR;
+								pll_ptr = 0;
+								pll_buf[1] = 0xffffffffL;
+							}
 							sout_flags &= ~SOUT_MSQU_F;									// clear signal flag
-							pll_buf[1] = 0xffffffffL;
 							break;
 
 						case SOUT_SSQU_N:
-							pll_buf[0] = atten_calc(vfo_p[bandid_s].sq) | ATTEN_SUB | SQU_ADDR;
-							pll_ptr = 0;
+							i = vfo_p[bandid_s].sq;
+							if(i != last_ssqu){
+								last_ssqu = i;
+								pll_buf[0] = atten_calc(i) | ATTEN_SUB | SQU_ADDR;
+								pll_ptr = 0;
+								pll_buf[1] = 0xffffffffL;
+							}
 							sout_flags &= ~SOUT_SSQU_F;									// clear signal flag
-							pll_buf[1] = 0xffffffffL;
 							break;
 
 						case SOUT_TONE_N:												// send tone message
@@ -989,28 +1032,20 @@ void  force_push_radio(void){
 //-----------------------------------------------------------------------------
 // get_busy() looks for band busy == 1 or 20ms timeout
 //	used by init_radio() as part of the IPL init
+//	returns 0 if not busy, 1 if busy detected, 0xff if no data
 //-----------------------------------------------------------------------------
 U8  get_busy(void){
-	U8	bzy = 0;
-	U8	i = 50;			// timeout, 20ms
-	U8	j;
+	U8	bzy = 0xff;
 	U32	ii;
 
-	for(j=0; j<3; j++){
-		do{												// get 1st SIN, and discard
-			wait(1);
-			ii = get_sin();
-			i--;
-		}while(!ii && i);
-	}
-	i = 50;
-	do{
-		wait(1);
+	if(got_sin()){
 		ii = get_sin();
-		i--;
-	}while((ii & SIN_ADDR) || (!ii && i));				// look for 2nd SIN with ADDR == 0...
-	if(ii && !(ii & SIN_ADDR) && !(ii & SIN_BUSY)){
-		bzy = 1;
+		if(ii && !(ii & SIN_ADDR) && !(ii & SIN_BUSY)){
+			bzy = 1;
+		}else{
+			bzy = 0;
+//			putchar_bQ('-'); //!!! debug
+		}
 	}
 	return bzy;
 }
@@ -1594,10 +1629,21 @@ S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq){
 		}else{
 			if((!mic_time(0)) && (sin_addr1 & SIN_MCK)){
 				mic_time(1);								// set short gap time for hold press
-				// if mem mode, start scan
-				if(!doscan(focus, 1)){
-		    		do_dial_beep();								// beep
-					rtn = i;
+				// if mem mode & no scan, start scan
+				if(focus == MAIN){
+					if(!(xmq & MSCANM_XFLAG)){					// process main
+						if(!doscan(focus, 1)){
+				    		do_dial_beep();					// beep
+							rtn = i;
+						}
+					}
+				}else{
+					if(!(xmq & MSCANS_XFLAG)){					// process sub
+						if(!doscan(focus, 1)){
+				    		do_dial_beep();					// beep
+							rtn = i;
+						}
+					}
 				}
 			}
 		}
@@ -2124,6 +2170,15 @@ void read_nvmem(U8 band, U8 memnum){
 		*cptr++ = rw8_nvr(addr, 0, j);
 	}
 	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_memaddr() returns the address of the mem#/band
+//-----------------------------------------------------------------------------
+U32 get_memaddr(U8 band, U8 memnum){
+
+	return mem_band[band] + (memnum * MEM_LEN);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

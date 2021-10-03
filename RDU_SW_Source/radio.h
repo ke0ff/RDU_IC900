@@ -78,6 +78,7 @@ struct vfo_struct {
 					// mem structure follows this format:
 					// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
 #define	MEM_LEN		(sizeof(U32) + sizeof(U16) + (sizeof(U8) * 7) + MEM_NAME_LEN)
+#define	MEM_STR_ADDR	(sizeof(U32) + sizeof(U16) + (sizeof(U8) * 7))
 #define	NUM_MEMS	34							// 30 mems, + 4 call mems
 #define	MAX_MEM		30
 #define	CALL_MEM	30
@@ -171,6 +172,7 @@ struct vfo_struct {
 #define	TSW_TIME		SEC10		// TS adj timeout
 #define	SLIDE_TIME		SEC300MS	// text slider display shift rate
 #define	SCAN_TIME		SEC400MS	// scan channel rate
+#define	SCAN_TIME2		SEC1		// scan channel LOS hold time
 
 // set/read_tsab():
 #define	TSA_SEL			1			// selects TSA
@@ -248,3 +250,4 @@ void set_vnv(U8 focus);
 void set_tonenv(U8 focus);
 U8 get_scanmem(U8 focus);
 U8 togg_scanmem(U8 focus);
+U32 get_memaddr(U8 band, U8 memnum);
