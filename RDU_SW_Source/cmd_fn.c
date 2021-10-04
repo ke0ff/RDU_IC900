@@ -58,12 +58,12 @@ enum err_enum{ no_response, no_device, target_timeout };
 // enum list of command numerics
 //	each enum corresponds to a command from the above list (lastcmd corresponds
 //	with the last entry, 0xff)
-//                                                           1     1     1   1   1  1     1   1  1  2  2   2
-//                        0  1  2  3   4   5  6  7  8  9  0  1     2     3   4   5  6     7   8  9  0  1   2
-const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0TI\0T\0?\0H\0VERS\0\xff"};
-//             0      1       2       3       4       5       6      7       8       9       10       11   12   13   14   15    16       17
-enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,
-//             18        19      20    21    22
+//                                                           1     1     1   1   1  1   1     1    1   2  2  2  2
+//                        0  1  2  3   4   5  6  7  8  9  0  1     2     3   4   5  6   7     8    9   0  1  2  3
+const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0STO\0TI\0T\0?\0H\0VERS\0\xff"};
+//             0      1       2       3       4       5       6      7       8       9       10       11   12   13   14   15    16       17       18
+enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,sto_mem,
+//             19        20      21    22    23
 			   timer_tst,trig_la,help1,help2,vers,lastcmd,helpcmd };
 
 #define	cmd_type	char	// define as char for list < 255, else define as int
@@ -150,6 +150,9 @@ U8* log_error_byte(U8* lbuf, U8 d, U8 h, U16 a);
 void disp_error_log(U8* lbuf, U16 len);
 void do_help(void);
 void disp_esc(char flag);
+U8 sto_nvmem(U8 band, U8 memnum, char* sptr);
+char* char_srch(char* sptr, char searchr);
+U8 str_chks(char* sptr);
 
 //=============================================================================
 // CLI cmd processor entry point
@@ -168,7 +171,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 //	char	bbuf[6];				// temp string buffer
 	U16		params[ARG_MAX];		// holding array for numeric params
 	char	c;						// char temp
-//	char	d;						// char temp
+	char	d;						// char temp
 	char	pc = FALSE;				// C flag (set if "-C" found in args)
 	char	pw = FALSE;				// W flag (set if "-W" found in args)
 	char	px = FALSE;				// X flag (set if "-X" found in args)
@@ -185,10 +188,11 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 	U8		i;						// temp
 	U8		j;						// temp
 	U8		l;						// temp
+	S32		mem_buf8[7];			// U8 mem buffer
 //	U8*		ptr0;					// U8 mem pointer
 	U16		k;						// U16 temp
 	U16		kk;						// U16 temp
-//	U16		hh;						// U16 temp
+	U32		hh;						// U16 temp
 	U16		adc_buf[8];				// adc buffer
 	U16*	ip;						// U16 pointer
 //	U16		tadc_buf[8];			// adc buffer
@@ -318,6 +322,87 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						}
 					}else{
 						putsQ("!Error!");
+					}
+					break;
+																				// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME + STR_CHKS
+																				// if STR_CHKS omitted or is incorrect, an error is reported, but the cmd line processes anyway
+																				// STO 3 A XX "1296000 20000 S/P/M 103.5 34 34 -7 +7 5 !1234567890123456!"
+																				// 1234567890123456789012345678901234567890123456789012345678901234567890
+																				//          1         2         3         4         5         6         7
+				case sto_mem:													// store mem: p[0] = band+1, p[1] = mem#, a[3] = mem_param_string
+					params[0] = 0;								// band#		// STO <nnum> <mchr> "str"
+					params[2] = 0;								// checks		//
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
+					if(--params[0] > 5) params[1] = MAX_MEM;
+					if(params[1] < MAX_MEM){
+//						ii = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR; // band/mem#
+//						sscanf(args[3],"%d %d %c %f", &ii, &hh, &c, &fa);
+						sscanf(args[4],"%d %d %x %f %d %d %d %d %d %s", &ii, &hh, &mem_buf8[0], &fa, &mem_buf8[2], &mem_buf8[3], &mem_buf8[4], &mem_buf8[5], &mem_buf8[6], gp_buf);
+						l = (U8)mem_buf8[0];
+						k = (U16)(fa * 10.0);
+
+						kk = (U16)str_chks(args[4]);
+						t = char_srch(args[4], '!') + 1;
+						*char_srch(t, '!') = '\0';
+						sprintf(obuf,"STOMEM: %s; mem#: %c; name: '%s'", band_str[params[0]], ordinal2mem(params[1]), t);
+						putsQ(obuf);
+						sprintf(obuf,"  FREQ: %d", ii);
+						putsQ(obuf);
+						sprintf(obuf,"  OFFS: %d", hh);
+						putsQ(obuf);
+						switch(l & DPLX_MASK){
+						case DPLX_S:
+							d = 'S';
+							break;
+
+						case DPLX_P:
+							d = 'P';
+							break;
+
+						case DPLX_M:
+							d = 'M';
+							break;
+						}
+						sprintf(obuf,"  DPLX: %c", d);
+						putsQ(obuf);
+						if(l & LOHI_F) putsQ("   PWR: LOW");
+						else putsQ("   PWR: HI");
+						sprintf(obuf," CTCSS: %d  %02x", k, lookup_pl(k)+1);
+						putsQ(obuf);
+						sprintf(obuf,"    SQ: %d", mem_buf8[2]);
+						putsQ(obuf);
+						sprintf(obuf,"   VOL: %d", mem_buf8[3]);
+						putsQ(obuf);
+						sprintf(obuf,"   XIT: %d", mem_buf8[4]);
+						putsQ(obuf);
+						sprintf(obuf,"   RIT: %d", mem_buf8[5]);
+						putsQ(obuf);
+						sprintf(obuf,"  B_ID: %d", mem_buf8[6]);
+						putsQ(obuf);
+						if(!(l & SCANEN_F)) putsQ("  SKIP: ON");
+						if(params[2] != kk){									// checks test
+							sprintf(obuf,"CHKS error = %d", kk);
+							putsQ(obuf);
+						}else{
+							kk = get_memaddr((U8)params[0], (U8)params[1]);
+							rw32_nvr(kk, ii, CS_WRITE|CS_OPEN);
+							rw16_nvr(kk, (U16)hh, CS_WRITE);
+							rw8_nvr(kk, (U8)mem_buf8[0], CS_WRITE);
+							rw8_nvr(kk, lookup_pl(k)+1, CS_WRITE);
+							rw8_nvr(kk, (U8)mem_buf8[2], CS_WRITE);
+							rw8_nvr(kk, 0, CS_WRITE);								// vol deprecated (vfo_p[band].vol now a spare) //
+							rw8_nvr(kk, (U8)mem_buf8[4], CS_WRITE);
+							rw8_nvr(kk, (U8)mem_buf8[5], CS_WRITE);
+							rw8_nvr(kk, (U8)mem_buf8[6], CS_WRITE);
+							j = CS_WRITE;
+							for(i=0; i<MEM_NAME_LEN; i++){
+								if(i == (MEM_NAME_LEN - 1)) j |= CS_CLOSE;
+								rw8_nvr(kk, *t++, j);
+							}
+						}
+					}else{
+						putsQ("!Band/Mem# Error!");
 					}
 					break;
 
@@ -1397,7 +1482,7 @@ const char end_list[] = {0xff};
 	char	i;								// temp
 	char	found = FALSE;					// cmd found flag (default to not found)
 
-	ptr = (char*)cmd_list;												// start at beginning of serach list
+	ptr = (char*)cmd_list;										// start at beginning of serach list
 	while((*ptr & 0x80) != 0x80){								// process until 0xff found in search list
 		i = strncmp(string, ptr, strlen(ptr));					// inbound string match search list?
 		if(i){
@@ -1569,8 +1654,8 @@ int quotespace(char c, char qu_c){
 
     if(qu_c == '\0'){
         switch (c){				// if qu_c is null, these are valid quotes:
-            case '\'':          // newline
-            case '\"':          // cr
+            case '\'':          // single
+            case '\"':          // double
             case '\t':          // tab
                 return TRUE;
             }
@@ -1732,4 +1817,62 @@ float temp_float(U16 k){
 		fa *= -1;
 	}
 	return fa;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// sto_nvmem() writes the unparsed string to the nv memory space
+//	returns true if error, false if OK
+//-----------------------------------------------------------------------------
+U8 sto_nvmem(U8 band, U8 memnum, char* sptr){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+/*	U32	addr;		// temps
+	U8	i;
+	U8	j;
+	char* cptr;
+
+	addr = mem_band[band] + (memnum * MEM_LEN);
+	j = CS_WRITE;
+	rw32_nvr(addr, vfo_p[band].vfo, j|CS_OPEN);
+	rw16_nvr(addr, vfo_p[band].offs, j);
+	rw8_nvr(addr, vfo_p[band].dplx, j);
+	rw8_nvr(addr, vfo_p[band].ctcss, j);
+	rw8_nvr(addr, vfo_p[band].sq, j);
+	rw8_nvr(addr, 0, j);								// vol deprecated (vfo_p[band].vol now a spare) //
+	rw8_nvr(addr, ux129_xit, j);
+	rw8_nvr(addr, ux129_rit, j);
+	rw8_nvr(addr, band, j);
+	cptr = memname[band];
+	for(i=0; i<MEM_NAME_LEN; i++){
+		if(i == (MEM_NAME_LEN - 1)) j |= CS_CLOSE;
+		rw8_nvr(addr, *cptr++, j);
+	}*/
+	return 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// char_srch() looks for a character in a target string.
+//	returns pointer to char (if pointed location == '\0', char not found)
+//-----------------------------------------------------------------------------
+char* char_srch(char* sptr, char searchr){
+	char* sp = sptr;
+
+	while((*sp != searchr) && (*sp)) sp++;
+	return sp;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// str_chks() calculates U8 checksum until a quote is reached.  returns U8 checksum
+//-----------------------------------------------------------------------------
+U8 str_chks(char* sptr){
+	char* sp = sptr;
+	U8	i = 0;
+
+	while((*sp != '"') && (*sp)){
+		i += *sp++;
+	}
+	return i;
 }

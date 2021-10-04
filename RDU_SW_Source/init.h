@@ -77,6 +77,9 @@
 #define	SOUT_PACE_TIME	9			// 33/4800 s for one SOUT msg
 #define	SIN_PACE_TIME	50			// wait a little over 2 word times (2 x 32/4800 s for one SIN word)
 
+#define	CLI_BUFLEN	80						// CLI buffer length
+#define	RE_BUFLEN	40						// buffer mem lengths
+
 // ssi bit rate defns
 // BR = SYSCLK/(CPSR * (1 + SCR))
 // SCR = (SYSCLK/(BR * CPSR)) - 1

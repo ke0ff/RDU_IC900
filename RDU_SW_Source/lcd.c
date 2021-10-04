@@ -62,10 +62,15 @@ U8	lcd_qv_lsd[5][3] = {													// list of 5 7-seg ordinal patterns
 U8	ts_order[3] = { 0x21, 0x51, 0x52 };
 
 // List of supported CTCSS tones, in Hz * 10.  1st tone is #1, last is #38:
+//					  00	01    02    03    04    05    06    07
 U16	tone_list[] = {  670,  719,  744,  770,  797,  825,  854,  885,
+//					  08	09    0a    0b    0c    0d    0e    0f
 					 915,  948,  974, 1000, 1035, 1072, 1109, 1148,
+//					  10	11    12    13    14    15    16    17
 					1188, 1230, 1273, 1318, 1365, 1413, 1462, 1514,
+//					  18	19    1a    1b    1c    1d    1e    1f
 					1567, 1622, 1679, 1738, 1799, 1862, 1928, 2035,
+//					  20	21    22    23    24    25
 					2107, 2181, 2257, 2336, 2418, 2503 };
 
 // Mem ordinals         0         0123456789012345678901234
@@ -2920,6 +2925,25 @@ U8 mem2ordinal(char cm){
 //-----------------------------------------------------------------------------
 char ordinal2mem(U8 memnum){
 
-	if(memnum >= NUM_MEMS) return '!';						// err exit
+	if(memnum >= NUM_MEMS) return '!';					// err exit
 	return mem_ordinal[memnum];
+}
+
+//-----------------------------------------------------------------------------
+// lookup_pl() returns U8 CTCSS# from U16 frequency (PL tone * 10).
+//	truncates 1's digit of both LUT and parameter.  Thus, the decimal portion
+//	of the PL tone is not needed to get a match.
+//	returns 0xff if tone not found
+//-----------------------------------------------------------------------------
+U8 lookup_pl(U16 ctcss){
+	U8	i;	// temps
+	U16	ii;
+
+	ii = (ctcss / 10) * 10;								// truncate param
+	i = 0;
+	while((ii != (tone_list[i]/10)*10) && (i < sizeof(tone_list))){
+		i++;
+	}
+	if(i >= sizeof(tone_list)) i = 0xff;
+	return i;
 }

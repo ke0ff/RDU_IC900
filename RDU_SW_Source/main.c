@@ -14,7 +14,7 @@
  *  Project scope rev notes:
  *    				 To-do Checklist time!
  *    				 !!! there is a noticable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
- *    				 !!! Need to come up wit a re-start sequence without power cycling if the BERR is resolved.
+ *    				 !!! Need to come up with a re-start sequence without power cycling if the BERR is resolved.
  *    				 !!! mem scan needs to disable string disp mode...
  *    				 !!! "LOW" annunc needs to follow focus...
  *
@@ -31,8 +31,13 @@
  *    					the activity went silent, or the scan was stopped.  2) Scan start would keep pulsing mem channel after the button hold time.
  *    				 Added long scan time to COS active case to allow scan to dwell a bit after LOS (right now, it is 1 sec).
  *    				 Began to add mem-string support.  "MHZ" pressed in mem mode will toggle string display.
- *    				 Added "MSTR" CLI command to program and interrogate mem strings.
  *    				 Added "long" pause to LOS dwell in mem scan (matches IC-901 mem scan behavior).
+ *    				 Some CLI house cleaning to add CLI_BUFLEN #define to set buffer lengths.  Some additional edits of gets_tab() to support a longer
+ *    				 	main CLI buffer than the memory buffers (supports mem management cmds that will be automated and don't need to be correctly
+ *    				 	captured in the command memory buffer stack).
+ *    				 Added "MSTR" CLI command to program and interrogate mem strings.
+ *    				 Added "STO" CLI cmd to store a memory using the serial port cmd line.  Mildly human-interfaceable, but needs a WINAPP wrapper
+ *    				 	to mechanize.
  *    10-02-21 jmh:	 process_SOUT(): added "last" vol/squ registers and code to only update once.  Gets rid of "pfft-pfft-pfft..." noise when one
  *    					band is scanning and the other band has a quieted open-squelch.
  *    				 Did some rework to the module present boot sequence to improve reliability.
@@ -382,11 +387,11 @@ int main(void){
 	volatile uint32_t ui32Loop;
 //	uint32_t i;
 //    uint8_t	tempi;			// tempi
-    char	buf[40];			// command line buffer
-    char	rebuf0[40];			// re-do buffer#1
-    char	rebuf1[40];			// re-do buffer#2
-    char	rebuf2[40];			// re-do buffer#3
-    char	rebuf3[40];			// re-do buffer#4
+    char	buf[CLI_BUFLEN];	// command line buffer
+    char	rebuf0[RE_BUFLEN];	// re-do buffer#1
+    char	rebuf1[RE_BUFLEN];	// re-do buffer#2
+    char	rebuf2[RE_BUFLEN];	// re-do buffer#3
+    char	rebuf3[RE_BUFLEN];	// re-do buffer#4
     char	got_cmd;			// first valid cmd flag (freezes baud rate)
     U8		argn;				// number of args
     char*	cmd_string;			// CLI processing ptr
@@ -439,7 +444,7 @@ int main(void){
     		putchar_b(XON);
     		buf[0] = '\0';
     		putssQ("rdu>");										// prompt
-    		cmd_string = gets_tab(buf, rebufN, 80); 			// get cmd line & save to re-do buf
+    		cmd_string = gets_tab(buf, rebufN, RE_BUFLEN); 		// get cmd line & save to re-do buf
     		if(!got_cmd){										// if no valid commands since reset, look for baud rate change
     			if(cur_baud != abaud){							// abaud is signal from gets_tab() that indicates a baud rate change
     				if(set_baud(abaud)){						// try to set new baud rate
@@ -628,8 +633,8 @@ char *gets_tab(char *buf, char *save_buf[], int n){
                 break;
         }
 		last_chr = c;									// set last chr
-    } while((c != '\r') && (c != '\n') && (i < n));		// loop until c/r or l/f or buffer full
-	if(i >= n){
+    } while((c != '\r') && (c != '\n') && (i < CLI_BUFLEN));		// loop until c/r or l/f or buffer full
+	if(i >= CLI_BUFLEN){
 		putsQ("!! buffer overflow !!");
 		*buf = '\0';									// abort line
 	}else{

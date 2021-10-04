@@ -247,3 +247,4 @@ void set_ptt(U8 pttstat);
 void set_slide(U8 focus, U8 tf);
 U8 mem2ordinal(char cm);
 char ordinal2mem(U8 memnum);
+U8 lookup_pl(U16 ctcss);

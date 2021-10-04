@@ -2110,6 +2110,7 @@ void read_mem(U8 focus, U8 memnum){
 	read_nvmem(band, memnum);
 	return;
 }
+
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 // write_nvmem() writes the vfo state to the nv memory space
