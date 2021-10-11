@@ -21,6 +21,7 @@
 #include "init.h"						// App-specific SFR Definitions
 
 #include "cmd_fn.h"						// fn protos, bit defines, rtn codes, etc.
+#include "dpl_fn.h"						// dpl extension cmd/support.
 #include "serial.h"
 #include "version.h"
 #include "eeprom.h"
@@ -153,6 +154,8 @@ void disp_esc(char flag);
 U8 sto_nvmem(U8 band, U8 memnum, char* sptr);
 char* char_srch(char* sptr, char searchr);
 U8 str_chks(char* sptr);
+U32 dpl_calc(U16 dplcode);
+U8 cadd(U16 dplcode, U8 index);
 
 //=============================================================================
 // CLI cmd processor entry point
@@ -1191,9 +1194,13 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					break;
 
 				case dis_la:												// disarm (stop) analyzer
-					reset_lcd();
+/*					reset_lcd();
 					sprintf(obuf,"RST LCD.\n");
-					putsQ(obuf);
+					putsQ(obuf);*/
+
+					params[0] = 0;
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					dpl_cmd(obuf, &params[0], ps);
 					break;
 
 				case list_la:												// list analyzer
@@ -1261,7 +1268,7 @@ void do_help(void){
 	putsQ("ke0ff KPU Debug CMD List:");
 	putsQ("Syntax: <cmd> <arg1> <arg2> ... args are optional depending on cmd.");
 	putsQ("\t<arg> order is critical except for floaters.");
-	putsQ("\"?\" as first <arg> gives cmd help, \"? ?\" lists all cmd help lines. When");
+	putsQ("\"?\" as first <arg> gives cmd help,  \"? ?\" lists all cmd help lines. When");
 	putsQ("selectively entering <args>, use \"-\" for <args> that keep default value.");
 	putsQ("\"=\" must precede decimal values w/o spaces. Floating <args>: these non-number");
 	putsQ("<args> can appear anywhere in <arg> list: \"W\" = wait for operator\n");
@@ -1445,6 +1452,13 @@ U8 get_Dargs(U8 argsrt, U8 nargs, char* args[ARG_MAX], U16 params[8]){
 				case '$':
 					s++;
 					count += sscanf(s,"%x",&temp32);			// get hex if leading "$"
+					*ptr1 = (U16)(temp32);
+					break;
+
+				case 'O':
+				case 'o':
+					s++;
+					count += sscanf(s,"%o",&temp32);			// get octal if leading "O"
 					*ptr1 = (U16)(temp32);
 					break;
 			}

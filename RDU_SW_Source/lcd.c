@@ -91,6 +91,16 @@ U8	sys_err;						// system error flags.  0x00 = no errors
 U8	ptt_change;						// PTT changed flag (from radio.c)
 char mfbuf[16];						// ascii text (freq field) buffer, main
 char sfbuf[16];						// ... sub
+U32	mscan[ID1200];					// mem scan enable bits (gathered by get_mscan())
+U32	mscan_maskm;					// scan enable mask (m/s)
+U32	mscan_masks;
+U8	scan_switch;					// scan switch event flag
+U8	last_cosm[MAX_COS_MEM];			// last cos ban/mem# circ buffers
+U8	last_coss[MAX_COS_MEM];			// .. hi-nyb is band, low-nyb is mem#
+U8	last_cosm_tp;					// head/tail pointers
+U8	last_cosm_hp;
+U8	last_coss_tp;
+U8	last_coss_hp;
 
 //-----------------------------------------------------------------------------
 // Local Fn Declarations
@@ -100,7 +110,7 @@ void clear_lcd_buf(void);
 void alock(U8 tf);
 U32 bin32_bcdp(U32 bin32);
 void lamp_test(U8 tf);
-void update_lcd(U8 focus);
+void update_lcd(U8 focus, U8 forced_focus);
 U8 process_MS(U8 cmd);
 void process_VFODISP(U8 focus);
 U8 test_for_cancel(U8 key);
@@ -120,6 +130,10 @@ U8 puts_lcd(U8 focus, char *s, U8 dp_tf);
 void togg_tsab(U8 focus);
 U8 copy6str(char* sptr, char* dptr, U8 cidx);
 U8 nxtscan(U8 focus, U8 adder);
+U32 mem2bit(U8 memnum);
+void get_mscan(U8 focus);
+void set_last_cos(U8 focus);
+U8 get_last_cos(U8 focus);
 
 //-----------------------------------------------------------------------------
 // init_lcd() initializes lcd resources
@@ -205,8 +219,8 @@ void process_UI(U8 cmd){
 		mode = MAIN_MODE;												// init process variables
 		chkmode = 0;
 		vfo_display = 0;
-		update_lcd(MAIN);
-		update_lcd(SUB);
+		update_lcd(MAIN, MAIN);
+		update_lcd(MAIN, SUB);
 		process_MS(0xff);												// trigger main/sub process IPL init
 		is_mic_updn(1, 0, 0);											// init mic u/d repeat
 		ptt_change = 0;
@@ -286,18 +300,18 @@ void process_UI(U8 cmd){
 //-----------------------------------------------------------------------------
 // update_lcd() forces update of LCD values
 //-----------------------------------------------------------------------------
-void update_lcd(U8 focus){
+void update_lcd(U8 focus, U8 forced_focus){
 	U8	i;
 
-	if(focus == MAIN){
-		//**************************************
-		// update low/hi power display icon
-		i = get_lohi(MAIN, 0xff);
-		if(i){
-			alow(1);
-		}else{
-			alow(0);
-		}
+	//**************************************
+	// update low/hi power display icon
+	i = get_lohi(focus, 0xff);
+	if(i){
+		alow(1);
+	}else{
+		alow(0);
+	}
+	if(forced_focus == MAIN){
 		//**************************************
 		// update Duplex display, main
 		switch(read_dplx(MAIN) & (DPLX_MASK)){
@@ -373,6 +387,7 @@ U8 process_MS(U8 mode){
 	static	 U8		hflag;
 	U8	b;					// key beep counter
 	U8	i;					// temp
+	U8	j;					// temp
 	U8	k;					// temp
 	U32	ii;
 	volatile U32	sin_a0;
@@ -446,9 +461,17 @@ U8 process_MS(U8 mode){
 				if(sin_a0 & SIN_SQSB && !(sys_err & (NO_B_PRSNT|NO_SUX_PRSNT))){
 					// sub led
 					GPIO_PORTC_DATA_R |= SRX_N;							// sub led = on
-					scan_time(SUB, 2);									// reset scan timer
+					if(scan_switch){
+						if(!scan_time(SUB, 0)){
+//							scan_time(SUB, 1);							// reset scan timer after band edge (don't advance mem#)
+							scan_switch = 0;							// disable edge flag
+						}
+					}else{
+						scan_time(SUB, 2);								// reset scan timer
+					}
 				}else{
 					GPIO_PORTC_DATA_R &= ~SRX_N;						// sub led = off
+					set_last_cos(SUB);									// store last COS
 				}
 				read_sin_flags(SIN_SQSM_F|SIN_SQSS_F);					// clear changes flag
 			}
@@ -474,7 +497,7 @@ U8 process_MS(U8 mode){
 		// process timeouts (MHz, xflag and SUB)
 		if(!mhz_time(0) && (maddr < MHZ_OFF)){							// process mhz digit timeout:
 			do_2beep();													// timeoute alert beep (Morse "I")
-			if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,0);
+			if(band_focus == MAIN) digblink(MAIN_CS|maddr,0);
 			else digblink(maddr,0);
 			maddr = MHZ_OFF;
 			copy_vfot(band_focus);
@@ -492,7 +515,7 @@ U8 process_MS(U8 mode){
 		}
 		if((xmodeq & OFFS_XFLAG) && (!offs_time(0))){					// if offs x-mode timeout:
 			do_2beep();													// timeoute alert beep (Morse "I")
-			if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0);
+			if(band_focus == MAIN) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),0);
 			else digblink(maddr,0);
 			mhz_time(0xff);												// clear timers
 			offs_time(0xff);
@@ -500,12 +523,13 @@ U8 process_MS(U8 mode){
 			xmodeq &= ~OFFS_XFLAG;
 			if(band_focus == MAIN) vfo_display |= MAIN;					// update main VFO
 			else vfo_display |= SUB_D;									// update sub VFO
+			// if tx
 			force_push();												// force update to NVRAM
 		}
 		if(band_focus == SUB){
 			if(!sub_time(0)){											// if SUB timeout, return to main focus
 				do_3beep();												// timeoute alert beep (Morse "S")
-				band_focus = MAIN_MODE;
+				band_focus = MAIN;
 				asub(0);
 				ats(read_dplx(MAIN) & TSA_F);
 				i = get_lohi(band_focus, 0xff);
@@ -585,6 +609,7 @@ U8 process_MS(U8 mode){
 						break;
 					}
 				}
+				// if tx
 				force_push();											// force update to NVRAM
 				break;
 
@@ -601,6 +626,7 @@ U8 process_MS(U8 mode){
 				if(band_focus == MAIN){
 					add_vfo(band_focus, 0, MHZ_ONE);
 				}
+				// if tx
 				force_push();											// force update to NVRAM
 				break;
 
@@ -619,7 +645,7 @@ U8 process_MS(U8 mode){
 					}
 					k = get_band_index(band_focus);						// reset focus pointer
 					i = get_lohi(band_focus, 0xff);
-					update_lcd(SUB);
+					update_lcd(band_focus, SUB);
 					if(xmodeq & TEXTS_SLIDE){
 						update_radio_all(SUB_VQ);						// don't update freq if slider operating
 					}else{
@@ -871,7 +897,7 @@ U8 process_MS(U8 mode){
 			case VFOchr:												// VFO, initial press: cycles selected band modules (this is the BAND button on the IC-901)
 				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
 					set_next_band(band_focus);
-					update_lcd(band_focus);
+					update_lcd(band_focus, band_focus);
 					if(band_focus == MAIN) i = MAIN_ALL;
 					else i = SUB_ALL;
 					update_radio_all(i);
@@ -889,7 +915,7 @@ U8 process_MS(U8 mode){
 					if(mute_mode & SUB_MUTE){
 						adjust_vol(MAIN, 0);							// restore main vol
 					}
-					update_lcd(band_focus);
+					update_lcd(band_focus, band_focus);
 					update_radio_all(UPDATE_ALL);
 					force_push();										// force update to NVRAM
 				}else{
@@ -944,6 +970,27 @@ U8 process_MS(U8 mode){
 				b = 0;	// no beeps
 				break;
 
+			case MRchr_H:												// Mem-mode recall last cos active band/mem
+				// if !mem mode, abort
+				if(!(xmode[k] & MEM_XFLAG)){							// enter mem mode if off
+					if((xmode[k] & (MC_XFLAG)) == 0){					// copy vfo to temp
+						copy_vfo2temp(band_focus);
+					}
+					mema(band_focus, 1);								// turn on "M"
+					mskpa(band_focus, get_scanmem(band_focus));			// update "skp" annunc.
+					xmode[k] |= MEM_XFLAG;
+				}
+				i = get_last_cos(band_focus);
+				j = i >> 5;
+				i &= 0x1f;
+				read_mem(band_focus, get_memnum(band_focus, 0));
+				write_xmode(band_focus);
+				update_lcd(band_focus, band_focus);
+				if(band_focus == MAIN) i = MAIN_ALL;
+				else i = SUB_ALL;
+				update_radio_all(i);
+				break;
+
 			case MRchr:													// Mem-mode toggle: this toggles between mem and vfo mode
 				// if mem mode, turn off
 				if(xmode[k] & CALL_XFLAG) xmode[k] &= ~(MC_XFLAG);		// turn off call, force M on
@@ -963,7 +1010,7 @@ U8 process_MS(U8 mode){
 					read_mem(band_focus, get_memnum(band_focus, 0));
 				}
 				write_xmode(band_focus);
-				update_lcd(band_focus);
+				update_lcd(band_focus, band_focus);
 				if(band_focus == MAIN) i = MAIN_ALL;
 				else i = SUB_ALL;
 				update_radio_all(i);
@@ -995,7 +1042,7 @@ U8 process_MS(U8 mode){
 					iflags |= SIN_SSRF_F;								// force update of SSRF
 				}
 				write_xmode(band_focus);
-				update_lcd(band_focus);									// update display & radio
+				update_lcd(band_focus, band_focus);						// update display & radio
 				if(band_focus == MAIN) i = MAIN_ALL;
 				else i = SUB_ALL;
 				update_radio_all(i);
@@ -1010,7 +1057,7 @@ U8 process_MS(U8 mode){
 					}else{
 						iflags |= SIN_SSRF_F;							// force update of SSRF
 					}
-					update_lcd(band_focus);
+					update_lcd(band_focus, band_focus);
 					if(band_focus == MAIN) i = MAIN_ALL;
 					else i = SUB_ALL;
 					update_radio_all(i);
@@ -1029,6 +1076,9 @@ U8 process_MS(U8 mode){
 				if(hflag == MWchr){
 					i = togg_scanmem(band_focus);
 					mskpa(band_focus, i);								// update "skp" annunc.
+					if(xmodeq & (MSCANM_XFLAG|MSCANS_XFLAG)){
+						get_mscan(band_focus);
+					}
 					b = 1;	// 1beeps
 					hflag = 0;
 				}
@@ -1043,7 +1093,7 @@ U8 process_MS(U8 mode){
 					}else{
 						iflags |= SIN_SSRF_F;							// force update of SSRF
 					}
-					update_lcd(band_focus);
+					update_lcd(band_focus, band_focus);
 				}else{
 					write_mem(band_focus, get_memnum(band_focus, 0));
 				}
@@ -1417,6 +1467,7 @@ U32 process_DIAL(U8 focus){
 			adjust_tone(focus, j);
 			vfo_display |= VMODE_TDISP;
 		}
+		j = 0;											// allow sub-scan to operate
 	}else{
 		if(tsdisplay){
 			// freq step select mode
@@ -1464,7 +1515,7 @@ U32 process_DIAL(U8 focus){
 					}
 					rflags |= SIN_SSRF_F;								// force update of SSRF
 					save_mc(focus);										// save changes to NVRAM
-					update_lcd(focus);
+					update_lcd(focus, focus);
 					if(focus == MAIN) i = MAIN_ALL;
 					else i = SUB_ALL;
 					update_radio_all(i);
@@ -1504,52 +1555,66 @@ U32 process_DIAL(U8 focus){
 						vfo_change(focus);
 					}
 				}
-			}else{ // (j == 0)
-				// main mem scan
-				if(xmodeq & MSCANM_XFLAG){
-					if(GPIO_PORTD_DATA_R & MTX_N){						// PTT active
-						doscan(MAIN, 0);								// shut down scan
-						set_slide(MAIN, 0);
-						do_1beep();
-					}else{
-						if(!(GPIO_PORTC_DATA_R & MRX_N) || (xmodez & MSCANM1_XFLAG)){ // main COS inactive or 1st scan
-							if(!scan_time(MAIN, 0) || (xmodez & MSCANM1_XFLAG)){
-								// process if scan timer == 0
-								xmodez &= ~MSCANM1_XFLAG;
-								if(!nxtscan(MAIN, 1)){
-									doscan(MAIN, 0);					// shut down scan, no mems enabled
-									set_slide(MAIN, 0);
-									do_3beep();
-								}else{
-									scan_time(MAIN, 1);					// reset scan timer
-									read_mem(MAIN, get_memnum(MAIN, 0)); // read new mem
-									rflags |= SIN_SSRF_F;				// force update of SSRF
-									save_mc(MAIN);						// save changes to NVRAM
-									update_lcd(MAIN);
-									update_radio_all(MAIN_ALL);
-								}
-							}
+			}
+		}
+	}
+	if(j == 0){
+		// main mem scan
+		if(xmodeq & MSCANM_XFLAG){
+			if(GPIO_PORTD_DATA_R & MTX_N){						// PTT active
+				doscan(MAIN, 0);								// shut down scan
+				set_slide(MAIN, 0);
+				do_1beep();
+			}else{
+				if(!(GPIO_PORTC_DATA_R & MRX_N) || (xmodez & MSCANM1_XFLAG)){ // main COS inactive or 1st scan
+					if(!scan_time(MAIN, 0) || (xmodez & MSCANM1_XFLAG)){
+						// process if scan timer == 0
+						xmodez &= ~MSCANM1_XFLAG;
+						if(!nxtscan(MAIN, 1)){
+							doscan(MAIN, 0);					// shut down scan, no mems enabled
+							set_slide(MAIN, 0);
+							do_3beep();
+						}else{
+							scan_time(MAIN, 1);					// reset scan timer
+							read_mem(MAIN, get_memnum(MAIN, 0)); // read new mem
+							rflags |= SIN_SSRF_F;				// force update of SSRF
+							save_mc(MAIN);						// save changes to NVRAM
+							update_lcd(focus, MAIN);
+							update_radio_all(MAIN_ALL);
 						}
 					}
 				}
-				// sub mem scan...
-				if(xmodeq & MSCANS_XFLAG){
-					if(!(GPIO_PORTC_DATA_R & SRX_N) || (xmodez & MSCANS1_XFLAG)){					// sub COS inactive
-						if(!scan_time(SUB, 0) || (xmodez & MSCANS1_XFLAG)){
-							// process if scan timer == 0
-							xmodez &= ~MSCANS1_XFLAG;
-							if(!nxtscan(SUB, 1)){
-								doscan(SUB, 0);							// shut down scan, no mems enabled
-								set_slide(SUB, 0);
-								do_3beep();
+			}
+		}
+		// sub mem scan...
+		if(xmodeq & MSCANS_XFLAG){
+			if(!(GPIO_PORTC_DATA_R & SRX_N) || (xmodez & MSCANS1_XFLAG)){					// sub COS inactive
+				if(!scan_time(SUB, 0) || (xmodez & MSCANS1_XFLAG)){
+					// process if scan timer == 0
+					xmodez &= ~MSCANS1_XFLAG;
+					if(scan_switch){
+						scan_time(SUB, 4);							// reset scan timer after band edge (don't advance mem#)
+						scan_switch = 0;							// disable edge flag
+					}else{
+						i = nxtscan(SUB, 1);						// advance mem#
+						if(!i){
+							doscan(SUB, 0);							// shut down scan, no mems enabled
+							set_slide(SUB, 0);
+							do_3beep();
+						}else{
+							if(i & 0x80){							// band switch
+								force_push();						// force update to NVRAM
+								set_bandnv();
+								scan_switch = 1;					// set switch event flag
+								scan_time(SUB, 3);					// reset scan timer for band edge event
 							}else{
-								scan_time(SUB, 1);						// reset scan timer
-								read_mem(SUB, get_memnum(SUB, 0));		// read new mem
-								rflags |= SIN_SSRF_F;					// force update of SSRF
-								save_mc(SUB);							// save changes to NVRAM
-								update_lcd(SUB);
-								update_radio_all(SUB_ALL);
+								scan_time(SUB, 1);					// reset scan timer
 							}
+							read_mem(SUB, get_memnum(SUB, 0));		// read new mem
+							rflags |= SIN_SSRF_F;					// force update of SSRF
+							save_mc(SUB);							// save changes to NVRAM
+							update_lcd(focus, SUB);
+							update_radio_all(SUB_ALL);
 						}
 					}
 				}
@@ -2793,6 +2858,7 @@ U8 doscan(U8 focus, U8 tf){
 		if(tf){
 			xmodeq |= MSCANM_XFLAG;
 			xmodez |= MSCANM1_XFLAG;
+			get_mscan(focus);
 		}else{
 			xmodeq &= ~MSCANM_XFLAG;
 		}
@@ -2808,6 +2874,7 @@ U8 doscan(U8 focus, U8 tf){
 		if(tf){
 			xmodeq |= MSCANS_XFLAG;
 			xmodez |= MSCANS1_XFLAG;
+			get_mscan(focus);
 		}else{
 			xmodeq &= ~MSCANS_XFLAG;
 		}
@@ -2826,20 +2893,137 @@ U8 doscan(U8 focus, U8 tf){
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 // nxtscan() steps to the next scannable mem
+// SUB-scan will skip to the next band when it reaches the end of the mem list
+//	The algorithm is not terribly simple:
+//	  1) the band must be installed.  If not, skip it entirely (set_next_band() accomplishes this)
+//	  2) Use the same algorithm as for the main-band until the end of the mem list is reached.
+//	  3) If we end up back at the origin band and origin mem#, then there are no scanable memories (abort).
+//	  4) the function needs to pass a signal that a band change was performed.
+//
+//	returns 0 if no enabled mems in band
+//	returns 1 if new mem is ready
+//	returns 0x81 if band-switch (sub only)
 //-----------------------------------------------------------------------------
 U8 nxtscan(U8 focus, U8 adder){
-	U8	i;
+	U8	memstrt;
 	U8	j;
-	U8	k = 0;
+	U8	breakout = 0;
+	U8	scanen = 0;
+	U8	bid;			// band id
+	U8	bids;			// band id start
+	U32	memask;
 
-	i = get_memnum(focus, 0);					// set start
-	do{
-		j = get_memnum(focus, adder);			// get next memnum
-		if(j != i){
-			k = get_scanmem(focus);				// k is true if scan enabled
+	memstrt = get_memnum(focus, 0);						// set start mem#
+	memask = mem2bit(memstrt);
+	bids = get_band_index(focus);						// set start band id
+	if(focus == MAIN){
+		j = memstrt;
+		do{
+			j += 1;										// advance mem#
+			memask <<= 1;
+			if(j >= MAX_MEM){
+				j = 0;
+				memask = 0x01L;
+			}
+			if(memask & mscan[bids]){
+				scanen = TRUE;							// k is true if scan enabled
+				set_memnum(bids, j);
+			}
+
+/*			j = get_memnum(focus, adder);				// get next memnum
+//			eol = j & 0x80;								// isolate end of list..
+			j &= 0x7f;									// isolate mem#
+			if(mem2bit(j) & mscan[bids]){
+				scanen = TRUE;							// k is true if scan enabled
+			}*/
+		}while((j != memstrt) && !scanen);
+		if(j == memstrt) scanen = 0;					// if 1 or no channels enabled, "no scan"
+	}else{
+		bid = bids;										// set band id to start
+		j = memstrt;									// set running mem# = start mem#
+		do{
+			j += 1;										// advance mem#
+			memask <<= 1;
+			if(j >= MAX_MEM){							// if end of list...
+				j = 0;									// rollover mem# and mask
+				memask = 0x01L;
+				bid = set_next_band(focus);				// go to next available band
+				if(((bid == bids) && (j == memstrt)) || (bid == BAND_ERROR)){ // if back to starting point or error, set exit
+					breakout = 1;						// end of lookup
+				}else{
+					if(mscan[bid] == 0){				// if no channels enabled,
+						j = MAX_MEM;					// no channels enabled, skip to next band
+					}
+				}
+			}
+			if(mem2bit(j) & mscan[bid]){
+				scanen = 1;								// if scan enabled set end of lookup
+			}
+		}while(!scanen & !breakout);
+		if(breakout) scanen = 0;
+		else{
+			if(scanen && (bid != bids)) scanen = 0x81; // band change exit
+			set_memnum(bid, j);
 		}
-	}while((j != i) & !k);
-	return k;
+	}
+	return scanen;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_mscan() gathers scan enable bits for all mem locations.
+//	main just does main band, sub does all bands
+//-----------------------------------------------------------------------------
+void get_mscan(U8 focus){
+	U8	bid;
+	U8	j;
+	U8	k;
+	U32	mask;
+
+	if(focus == MAIN){								// process main band
+		bid = get_band_index(focus);
+		mask = 0x20000000L;							// set start at mem#29
+		mscan[bid] = 0;
+		j = MAX_MEM-1;
+		do{
+			k = get_scanen(bid, j);					// k is true if scan enabled
+			if(k){
+				mscan[bid] |= mask;
+			}
+			j--;
+			mask >>= 1;
+		}while(mask);
+	}else{											// process all bands
+		for(bid=0; bid<ID1200; bid++){
+			mscan[bid] = 0;
+			mask = 0x20000000L;						// set start at mem#30
+			j = MAX_MEM-1;
+			do{
+				k = get_scanen(bid, j);				// k is true if scan enabled
+				if(k){
+					mscan[bid] |= mask;
+				}
+				j--;
+				mask >>= 1;
+			}while(mask);
+		}
+	}
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// mem2bit() returns bitmask for corresponding mem#
+//-----------------------------------------------------------------------------
+U32 mem2bit(U8 memnum){
+	U32	ii = 0x01L;		// temp
+	U8	i = memnum;
+
+	while(i){
+		ii <<= 1;
+		i--;
+	}
+	return ii;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2945,5 +3129,53 @@ U8 lookup_pl(U16 ctcss){
 		i++;
 	}
 	if(i >= sizeof(tone_list)) i = 0xff;
+	return i;
+}
+
+//-----------------------------------------------------------------------------
+// set_last_cos() stores bid and mem# in next location of last_cosx[] array.
+//-----------------------------------------------------------------------------
+void set_last_cos(U8 focus){
+	U8	i;	// temps
+	U8	j;
+
+	i = get_memnum(focus, 0);									// construct composite of mem# and bid
+	j = get_band_index(focus);
+	i |= j << 5;
+	if(focus == MAIN){
+		last_cosm[last_cosm_hp] = i;							// store to next buffer position
+		if(++last_cosm_hp >= MAX_COS_MEM) last_cosm_hp = 0;		// advance head pointer
+		if(last_cosm_hp == last_cosm_tp){						// if h == t, advance tail (lose oldest data)
+			if(++last_cosm_tp >= MAX_COS_MEM) last_cosm_tp = 0;
+		}
+	}else{
+		last_coss[last_coss_hp] = i;							// store to next buffer position
+		if(++last_coss_hp >= MAX_COS_MEM) last_coss_hp = 0;		// advance head pointer
+		if(last_coss_hp == last_coss_tp){						// if h == t, advance tail (lose oldest data)
+			if(++last_coss_tp >= MAX_COS_MEM) last_coss_tp = 0;
+		}
+	}
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// get_last_cos() recalls bid and mem# from previous location of last_cosx[] array.
+//	returns composite of bid/mem#.
+//	A return value of 0xff means that there are no COS entries to recall.
+//-----------------------------------------------------------------------------
+U8 get_last_cos(U8 focus){
+	U8	i = 0xff;	// temps
+
+	if(focus == MAIN){
+		if(last_cosm_hp != last_cosm_tp){
+			if(--last_cosm_hp == 0xff) last_cosm_hp = MAX_COS_MEM - 1;
+			i = last_cosm[last_cosm_hp];
+		}
+	}else{
+		if(last_coss_hp != last_coss_tp){
+			if(--last_coss_hp == 0xff) last_coss_hp = MAX_COS_MEM - 1;
+			i = last_coss[last_coss_hp];
+		}
+	}
 	return i;
 }

@@ -19,6 +19,9 @@
 // Processor I/O assignments
 // ...see init.h
 
+// mem scan COS memory defines
+#define	MAX_COS_MEM		4		// "last cos" memory
+
 // mode defines
 #define	MODE_MASK		0x0f	// main modes mask
 #define	FOCUS_MASK		0x01	// focus mask

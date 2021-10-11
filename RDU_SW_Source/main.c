@@ -16,7 +16,6 @@
  *    				 !!! there is a noticable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
  *    				 !!! Need to come up with a re-start sequence without power cycling if the BERR is resolved.
  *    				 !!! mem scan needs to disable string disp mode...
- *    				 !!! "LOW" annunc needs to follow focus...
  *
  *    				 * test band switching (VFO button)
  *    				 * SET loop:
@@ -27,6 +26,20 @@
  *
  *
  *    Project scope rev History:
+ *    10-10-21 jmh:	 added "dpl_fn.c".  Holds dpl debug and support fns.
+ *    				 Rearranged code in process_DIAL() to allow sub-scan to process if set-tone is engaged in main band.
+ *    10-07-21 jmh:	 mem scan: tx was "popping" when sub-band in mem scan and switching bands.  Added "old_tx" static to setpll() to only send "no_ptt" frame
+ *    					if the TX state is new.  Only affects MAIN calls to setpll().
+ *    					!!! 1296 band is "skipping" on occasion when in mem scan.  No clue why...
+ *    10-05-21 jmh:	 mem scan: modified update_lcd to use two params, a native focus and a forced focus.  The native focus applies to annunciators
+ *    					that have local meaning (e.g., there is only one symbol that is shared between MAIN and SUB).  Forced focus allows the calling
+ *    					code to force the update focus for the non-shared symbols.
+ *    				 Started adding changes to reduce latency in mem scan and also support band-switches in sub-mem-scan.  New sceme uses mscan[6] array
+ *    				 	to hold scan enable bits for all mems in each band.  Nxt band can then refer to this array rather than having to call the NVRAM
+ *    				 	at each mem scan step.  If mscan[x] == 0, then the entire band can be skipped.
+ *    				 Sub-band now does multi-band scanning.  Had to add a band-switch edge flag and timer scheme as a countermeasure to the COS lamp flashing
+ *    				 	when there is a band switch.  There is likely a way to combat this with SOUT word sequences, but that solution will have to wait.
+ *    				 	SCAN_TIME3 sets the hold-off time (SCAN_TIME3 must be less than SCAN_TIME which is not currently enforced by pre-proc language).
  *    10-03-21 jmh:	 mem scan: corrected 2 issues, 1) if scan start stepped to a masked channel with activity, the system would stick on it until
  *    					the activity went silent, or the scan was stopped.  2) Scan start would keep pulsing mem channel after the button hold time.
  *    				 Added long scan time to COS active case to allow scan to dwell a bit after LOS (right now, it is 1 sec).
@@ -1403,14 +1416,29 @@ U8 scan_time(U8 focus, U8 tf){
 		}
 		if(scanmtimer) i = TRUE;
 	}else{
-		if(tf == 0xff){
+		switch(tf){
+		default:
+			break;
+
+		case 0xff:
 			scanstimer = 0;
-		}else{
-			if(tf == 1){
-				scanstimer = SCAN_TIME;
-			}else{
-				if(tf == 2) scanstimer = SCAN_TIME2;
-			}
+			break;
+
+		case 1:
+			scanstimer = SCAN_TIME;
+			break;
+
+		case 2:
+			scanstimer = SCAN_TIME2;
+			break;
+
+		case 3:
+			scanstimer = SCAN_TIME3;
+			break;
+
+		case 4:
+			scanstimer = SCAN_TIME4;
+			break;
 		}
 		if(scanstimer) i = TRUE;
 	}

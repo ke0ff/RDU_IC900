@@ -57,6 +57,7 @@
 #define BASE_TX_1200	(136600L/10L)	// (+) 1.2G is 10KHz channel
 // PLL base bitmaps
 #define INIT_PLL_6M		0x01325L			// PLL init pattern for 6M & 10M
+#define INIT_PLL_10M	0x01325L
 #define PLL_10M			0x01e3bL			// must <<1 after adding freq
 #define PLL_6M			0x02a2eL			// must <<1 after adding freq
 #define PLL_2M			0x05CD0L

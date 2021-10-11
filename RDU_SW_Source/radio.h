@@ -173,6 +173,8 @@ struct vfo_struct {
 #define	SLIDE_TIME		SEC300MS	// text slider display shift rate
 #define	SCAN_TIME		SEC400MS	// scan channel rate
 #define	SCAN_TIME2		SEC1		// scan channel LOS hold time
+#define	SCAN_TIME3		SEC100MS	// scan band switch debounce time
+#define	SCAN_TIME4		(SCAN_TIME - SCAN_TIME3)	// scan band switch debounce time
 
 // set/read_tsab():
 #define	TSA_SEL			1			// selects TSA
@@ -249,5 +251,7 @@ void set_qnv(U8 focus);
 void set_vnv(U8 focus);
 void set_tonenv(U8 focus);
 U8 get_scanmem(U8 focus);
+U8 get_scanen(U8 bid, U8 memnum);
 U8 togg_scanmem(U8 focus);
 U32 get_memaddr(U8 band, U8 memnum);
+void set_memnum(U8 bid, U8 memnum);

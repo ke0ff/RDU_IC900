@@ -1025,6 +1025,16 @@ void  update_radio_all(U8 vector){
 void  force_push_radio(void){
 
 //	sout_flags |= SOUT_VUPD_F;
+/*	save_vfo(bandid_m);											// save VFOs
+	save_vfo(bandid_s);
+	set_qnv(MAIN);
+	set_qnv(SUB);
+	set_vnv(MAIN);
+	set_vnv(SUB);
+	set_tonenv(MAIN);
+	set_tonenv(SUB);
+	set_bandnv();
+*/
 	sout_flags |= (SOUT_MSQU_F | SOUT_SSQU_F | SOUT_MVOL_F | SOUT_SVOL_F | SOUT_VUPD_F | SOUT_VFOS_F | SOUT_VFOM_F);
 	return;
 }
@@ -1274,6 +1284,7 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
     U32	jj;
     U32	tt;
     U32	*	pllptr = plldata;
+static U8	old_tx;
 /*
 #define SOUT_MAIN	0x04000000L
 #define SOUT_SUB	0x02000000L
@@ -1282,6 +1293,8 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
 #define SOUT_BAND	0x00400000L
 #define SOUT_PTT	0x00200000L	// band unit PTT
 */
+
+	if((!is_tx) && is_main) old_tx = 0;
     band_idr = get_bandid(vfo_p[bid].vfo / 1000L);		// use vfo frequency to determine band ID
     ux_noptt = band_idr << 27;							// align band ID in SOUT proto word
     if(is_main){
@@ -1330,8 +1343,19 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
             pll -= BASE_TX_10M;							// subtract tx offset (for 10M and 6M)
        }
         pll <<= 1;										// align bitmap (only for 10M and 6M)
-        pllptr[i++] = ux_noptt | INIT_PLL_6M;			// store init frame
-        pllptr[i++] = ux_noptt | pll;					// store PLL plus bit length
+        if(old_tx){
+        	pllptr[i++] = ux_ptt | INIT_PLL_10M;			// store init frame w/ ptt on
+        }else{
+        	pllptr[i++] = ux_noptt | INIT_PLL_10M;		// store init frame
+        }
+        if(is_main){
+            if(!old_tx){
+            	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+            	old_tx = is_tx;
+            }
+        }else{
+        	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+        }
         if(is_tx){
             pllptr[i++] = ux_ptt | pll;					// store PLL plus PTT
         }
@@ -1345,8 +1369,19 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
             pll -= BASE_TX_6M;							// subtract tx offset (for 10M and 6M)
         }
         pll <<= 1;										// align bitmap (only for 10M and 6M)
-        pllptr[i++] = ux_noptt | INIT_PLL_6M;			// store init frame
-        pllptr[i++] = ux_noptt | pll;					// store PLL plus bit length
+        if(old_tx){
+        	pllptr[i++] = ux_ptt | INIT_PLL_6M;			// store init frame w/ ptt on
+        }else{
+        	pllptr[i++] = ux_noptt | INIT_PLL_6M;		// store init frame
+        }
+        if(is_main){
+            if(!old_tx){
+            	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+            	old_tx = is_tx;
+            }
+        }else{
+        	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+        }
         if(is_tx){
             pllptr[i++] = ux_ptt | pll;					// store PLL plus PTT
         }
@@ -1361,7 +1396,14 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
         }
         // insert a "0" into bit 7
         pll = ((pll << 1) & 0x3ff80L) | (pll & 0x003fL);
-        pllptr[i++] = ux_noptt | pll;					// store PLL plus bit length
+        if(is_main){
+            if(!old_tx){
+            	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+            	old_tx = is_tx;
+            }
+        }else{
+        	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+        }
         if(is_tx){
             pllptr[i++] = ux_ptt | pll;					// store PLL plus PTT
         }
@@ -1376,7 +1418,14 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
         }
         // insert a "0" into bit 7
         pll = ((pll << 1) & 0x3ff80L) | (pll & 0x003fL);
-        pllptr[i++] = ux_noptt | pll;					// store PLL plus bit length
+        if(is_main){
+            if(!old_tx){
+            	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+            	old_tx = is_tx;
+            }
+        }else{
+        	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+        }
         if(is_tx){
             pllptr[i++] = ux_ptt | pll;					// store PLL plus PTT
         }
@@ -1389,7 +1438,14 @@ U32* setpll(U8 bid, U32* plldata, U8 is_tx, U8 is_main){
         if (is_tx) {
             pll += BASE_TX_440;							// add tx offset
         }
-        pllptr[i++] = ux_noptt | pll;					// store PLL plus bit length
+        if(is_main){
+            if(!old_tx){
+            	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+            	old_tx = is_tx;
+            }
+        }else{
+        	pllptr[i++] = ux_noptt | pll;				// on 1st pass, don't turn on PTT
+        }
         if(is_tx){
             pllptr[i++] = ux_ptt | pll;					// store PLL plus PTT
         }
@@ -1811,6 +1867,7 @@ U32 get_vfot(void){
 //-----------------------------------------------------------------------------
 U8 get_memnum(U8 main, U8 adder){
 	U8	k;
+	U8	i = 0;		// end of list semaphore
 
 	if(main == MAIN){
 		k = bandid_m;
@@ -1822,10 +1879,27 @@ U8 get_memnum(U8 main, U8 adder){
 	}
 	if((mem[k] < MAX_MEM) && (adder != 0)){
 		mem[k] += adder;
-		if(mem[k] > 0x80) mem[k] = MAX_MEM - 1;
-		if(mem[k] >= MAX_MEM) mem[k] = 0;
+		if(mem[k] > 0x80){						// process overflow
+			mem[k] = MAX_MEM - 1;
+			i = 0x80;							// set end of mem list reached
+		}
+		if(mem[k] >= MAX_MEM){					// process underflow
+			mem[k] = 0;
+			i = 0x80;							// set end of mem list reached
+		}
 	}
-	return mem[k];
+	i |= mem[k];								// transfer end of list semaphore
+	return i;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_memnum() sets memnum in the indicated bid
+//-----------------------------------------------------------------------------
+void set_memnum(U8 bid, U8 memnum){
+
+	mem[bid] = memnum;								// error fix
+	return;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2327,6 +2401,25 @@ U8 get_scanmem(U8 focus){
 	if(focus == MAIN) i = bandid_m;						// set main/sub index
 	else i = bandid_s;
 	addr = mem_band[i] + (mem[i] * MEM_LEN);			// calc base mem addr
+	addr += sizeof(U32) + sizeof(U16);					// point to duplex byte
+	j = rw8_nvr(addr, 0, CS_READ | CS_OPENCLOSE);		// read byte
+	return j & SCANEN_F;								// return masked bit
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_scanen() reads scan enable bit from NV space
+//-----------------------------------------------------------------------------
+U8 get_scanen(U8 bid, U8 memnum){
+	// mem structure follows this format:
+	// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME_LEN
+	U32	addr;		// temps
+	U8	i;
+	U8	j;
+
+	if(memnum >= MAX_MEM) i = mem[bid];					// set main/sub index
+	else i = memnum;
+	addr = mem_band[bid] + (i * MEM_LEN);				// calc base mem addr
 	addr += sizeof(U32) + sizeof(U16);					// point to duplex byte
 	j = rw8_nvr(addr, 0, CS_READ | CS_OPENCLOSE);		// read byte
 	return j & SCANEN_F;								// return masked bit
