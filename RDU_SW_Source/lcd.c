@@ -272,7 +272,7 @@ void process_UI(U8 cmd){
 		}
 		//**************************************
 		// process slide switches (DIM and LOCK)
-		if(GPIO_PORTB_DATA_R & (RAMCS_N) == LOCK_SELECT){
+		if((GPIO_PORTD_DATA_R & RAMCS_N) == LOCK_SELECT){
 //			wait(5);														// guaranteed settling time !!! need better solution here
 			i = GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);						// capture DIM/LOCK switch settings
 			if(i ^ sw_stat){												// if changes..
@@ -290,7 +290,7 @@ void process_UI(U8 cmd){
 				}else{
 					alock(0);												// process unlock mode
 				}
-				sw_stat = (sw_stat & ~(DIM | MISO_LOCK)) | i;					// update GPIO memory (used to trap changes)
+				sw_stat = (sw_stat & ~(DIM | MISO_LOCK)) | i;				// update GPIO memory (used to trap changes)
 			}
 		}
 	}
@@ -915,7 +915,8 @@ U8 process_MS(U8 mode){
 					if(mute_mode & SUB_MUTE){
 						adjust_vol(MAIN, 0);							// restore main vol
 					}
-					update_lcd(band_focus, band_focus);
+					update_lcd(band_focus, MAIN);
+					update_lcd(band_focus, SUB);
 					update_radio_all(UPDATE_ALL);
 					force_push();										// force update to NVRAM
 				}else{

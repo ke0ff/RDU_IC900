@@ -26,6 +26,9 @@
  *
  *
  *    Project scope rev History:
+ *    10-18-21 jmh:	 Modified slide switch processing (lcd.c => process_UI()) to correct an unfortunate misapplication of parenthesis. Now the dim/brt
+ *						switch seems to work.
+ *    10-10-21 jmh:	 Modified MSchr to update both MAIN and SUB.
  *    10-10-21 jmh:	 added "dpl_fn.c".  Holds dpl debug and support fns.
  *    				 Rearranged code in process_DIAL() to allow sub-scan to process if set-tone is engaged in main band.
  *    10-07-21 jmh:	 mem scan: tx was "popping" when sub-band in mem scan and switching bands.  Added "old_tx" static to setpll() to only send "no_ptt" frame
