@@ -1,5 +1,5 @@
 /********************************************************************
- ************ COPYRIGHT (c) 2016 by ke0ff, Taylor, TX   *************
+ ************ COPYRIGHT (c) 2022 by ke0ff, Taylor, TX   *************
  *
  *  File name: serial.c
  *
@@ -49,34 +49,25 @@ U8   xmptr;						// xmodem buf pointer
 #define	XM_TX_DATAEND (XM_TX_DATASRT + 128)
 
 // UART0 control flags & regs (DEBUG CLI I/O)
+U8  bteol;						// BT eol detected
 U8  TI0B;						// UART0 TI0 reflection (set by interrupt)
-#define RXD0_BUFF_END 40		// CLI rx buff len
-#define RXD1_BUFF_END 40		// CCMD rx buff len
-#define RXD2_BUFF_END 40		// CIV rx buff len
-#define TXD_BUFF_END 30			// tx buffs
+#define RXD0_BUFF_END 80		// CCMD rx buff len
+#define RXD1_BUFF_END 80		// CLI rx buff len
+#define TXD_BUFF_END 100			// tx buffs
 #define TXD1_BUFF_END 100		// tx1 buff
 
 S8   volatile rxd_buff[RXD0_BUFF_END];	// rx data buffer
 U8   volatile rxd_hptr;					// rx buf head ptr
 U8   volatile rxd_tptr;					// rx buf tail ptr
 U8   volatile rxd_stat;					// rx buff status
+U8	 volatile rxd_mcnt;					// msg (EOL) count
 
 // UART1 (CCMD I/O, RS485)
 U8   volatile rxd1_buff[RXD1_BUFF_END];	// rx1 data buffer
 U8   volatile rxd1_hptr;					// rx1 buf head ptr
 U8   volatile rxd1_tptr;					// rx1 buf tail ptr
 U8   volatile rxd1_stat;					// rx1 buff status
-U8   volatile frm1_buff[RXD1_BUFF_END];	// rx1 frame buffer
 U8   volatile rxd1_state;				// rx1 tsip state
-U8   volatile rxd1_dle_count;			// rx1 tsip dle counter
-U8   volatile rxd1_lastc;				// rx1 tsip last chr reg
-U8   volatile rxd1_msgcnt;				// tsip message counter
-U8   volatile txd1_buff[TXD1_BUFF_END];	// tx1 data buffer
-U8   volatile txd1_hptr;					// tx1 buf head ptr
-U8   volatile txd1_tptr;					// tx1 buf tail ptr
-U8   volatile txd1_stat;					// tx1 buff status
-U8   volatile txd1_lastc;				// rx1 last-chr-sent reg
-U8   volatile txd1_rdy;					// txd pacing timer ready
 
 //-----------------------------------------------------------------------------
 // Local Fn Declarations
@@ -87,7 +78,6 @@ char getchr_b(void);
 char gotchr_b(void);
 char do_txeot(void);
 U32 config_uart0(U32 baud);
-//void jam_wait(void);
 void txstart1(void);
 
 //********************//
@@ -106,9 +96,7 @@ void initserial(void){
     rxd1_hptr = 0;
     rxd1_tptr = 0;
     rxd1_stat = 0;
-    frm1_buff[0] = FRAME_SRT;
-//    txd1_stat = 0;
-
+    rxd_mcnt = 0;
     init_uart0(115200L);
 //	process_xrx(RX_STATE_INIT);
 	xmode = FALSE;
@@ -694,8 +682,7 @@ char gotchr(void){
 //-----------------------------------------------------------------------------
 U8 gotmsgn(void){
 
-//	return rxd0_msgcnt;								// pass the msg count status
-	return 0;
+	return rxd_mcnt;
 }
 
 //-----------------------------------------------------------------------------
@@ -745,11 +732,36 @@ int puts0(const char *string){
 // putss() does puts w/o newline
 //-----------------------------------------------------------------------------
 int putss(const char *string){
+	char c;
+	char clast = '\0';
 
 	while(*string){
-		putchar0(*string++);
+		c = *string++;
+		if(c == '^'){
+			if(clast == '^') putchar0('\r');
+		}else{
+			putchar0(c);
+		}
+		clast = c;
 	}
 	return 0;
+}
+
+//-----------------------------------------------------------------------------
+// getss() gets string from input buffer and xfrs to dptr
+//-----------------------------------------------------------------------------
+char* getss(char* dptr){
+	char c;
+	char* cptr = dptr;
+
+	if(rxd_mcnt){
+		do{
+			c = getch00();
+			*cptr++ = c;
+		}while(c);
+		rxd_mcnt--;
+	}
+	return cptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -760,26 +772,47 @@ int putss(const char *string){
 //-----------------------------------------------------------------------------
 char getch00(void){
 
-	char c;
+	char c = '\0';
 
-	while(rxd_tptr == rxd_hptr){
-		if(process_IO(0)){					// process system I/O
-			rxd_buff[rxd_hptr++] = '\r';	// phake a CR to bump the system out of the getch00 loop and back up to main()...
-			if(rxd_hptr == RXD0_BUFF_END){
-				rxd_hptr = 0;
-			}
+	if(rxd_tptr != rxd_hptr){
+		c = rxd_buff[rxd_tptr++];
+		if(rxd_tptr == RXD0_BUFF_END){
+			rxd_tptr = 0;
 		}
-	}
-	c = rxd_buff[rxd_tptr++];
-	if(rxd_tptr == RXD0_BUFF_END){
-		rxd_tptr = 0;
 	}
 	return c;
 }
 
-//==================== UART1 Fns =================================
-// CCMD I/O
-// Uses TSIP protocol (DLE/ETX)
+//-----------------------------------------------------------------------------
+// get_btptr returns bt data pointer
+//-----------------------------------------------------------------------------
+char* get_btptr(void){
+/*	char* cp = (char*)rxd_buff + rxd_hptr;
+	U8	cidx = 0;
+
+	do{
+
+	}while();*/
+	return 0;
+}
+
+//-----------------------------------------------------------------------------
+// clr_btptr clears bt data pointer
+//-----------------------------------------------------------------------------
+void clr_btptr(void){
+	rxd_hptr = 0;
+	rxd_tptr = 0;
+	return;
+}
+
+//===============================================================================================
+//=====================         =================================================================
+//==================== UART1 Fns ================================================================
+//=====================         =================================================================
+//===============================================================================================
+
+// UART CMD I/O
+
 /****************
  * init_uart inits UART1 to (baud), N81
  */
@@ -792,10 +825,12 @@ U32 init_uart1(U32 baud)
 	GPIO_PORTB_AFSEL_R |= RXD1|TXD1;				// connect UART RX & TX
 	GPIO_PORTB_PCTL_R &= ~(GPIO_PCTL_PB1_M|GPIO_PCTL_PB0_M); // enable UART function
 	GPIO_PORTB_PCTL_R |= (GPIO_PCTL_PB1_U1TX|GPIO_PCTL_PB0_U1RX);
+	rxd1_hptr = 0;									// init pointers
+	rxd1_tptr = 0;
 //	GPIO_PORTB_DIR_R |= 0x0002;						// txd = out
 //	GPIO_PORTB_DEN_R |= 0x0003;						// RXD = TXD = digital
-	init_tsip1();									// init tsip machine
-	txd1_rdy = 0;
+//	init_tsip1();									// init tsip machine
+//	txd1_rdy = 0;
 	for(i=0;i<100000;i++);
 	return config_uart1(baud);						// config UART
 }
@@ -822,24 +857,6 @@ U32 config_uart1(U32 baud){
 	UART1_CTL_R |= UART_CTL_UARTEN;					// enable UART
 	for(i=0;i<100000;i++);							// delay a bit...
 	return IR;
-}
-
-/****************
- * init_tsip1 inits tsip rcv logic.  Clears buffers and counters
- */
-void init_tsip1(void){
-
-	NVIC_DIS0_R = NVIC_EN0_UART1;					// disable UART1 intr
-	rxd1_state = TSIP_IDLE;							// rx1 tsip state: idle starts the rcv process
-	rxd1_dle_count = 0;								// rx1 tsip dlecnt: clear
-	rxd1_lastc = 0;									// rx1 tsip last chr reg: clear
-	rxd1_msgcnt = 0;								// rx1 message counter: clear
-	frm1_buff[0] = FRAME_SRT;						// set start of new frame
-	rxd1_hptr = 0;									// init pointers
-	rxd1_tptr = 0;
-	txd1_hptr = 0;
-	txd1_tptr = 0;
-//	NVIC_EN0_R = NVIC_EN0_UART1;					// enable UART1 intr
 }
 
 //-----------------------------------------------------------------------------
@@ -885,12 +902,12 @@ char getchr1(void){
 char gotchr1(void){
 	char c = FALSE;			// return val, default to "no chr"
 
-    if((rxd1_tptr != rxd1_hptr) && rxd1_msgcnt){	// if (head != tail) && there is at least 1 msg..
+    if(rxd1_tptr != rxd1_hptr){	// if (head != tail) && there is at least 1 msg..
     	c = TRUE;									// .. set chr ready to get flag
 	}
 	return c;
 }
-
+/*
 //-----------------------------------------------------------------------------
 // gotmsgn1 returns the rcvd msg count.
 //-----------------------------------------------------------------------------
@@ -921,7 +938,7 @@ char* gets1(char *string){
 	}
 	return string;									// return pointer to (end of dest) + 1
 }
-
+*/
 
 //-----------------------------------------------------------------------------
 // puts1() does puts to UART1
@@ -954,19 +971,21 @@ int putss1(const char *string){
 //-----------------------------------------------------------------------------
 char getch01(void){
 
-	char c;
+	char c = '\0';
 
-	while(rxd1_tptr == rxd1_hptr){
+/*	while(rxd1_tptr == rxd1_hptr){
 		if(process_IO(0)){					// process system I/O
 			rxd1_buff[rxd1_hptr++] = '\r';	// phake a CR to bump the system out of the getch00 loop and back up to main()...
 			if(rxd1_hptr == RXD1_BUFF_END){
 				rxd1_hptr = 0;
 			}
 		}
-	}
-	c = rxd1_buff[rxd1_tptr++];
-	if(rxd1_tptr == RXD1_BUFF_END){
-		rxd1_tptr = 0;
+	}*/
+	if(rxd1_tptr != rxd1_hptr){
+		c = rxd1_buff[rxd1_tptr++];
+		if(rxd1_tptr == RXD1_BUFF_END){
+			rxd1_tptr = 0;
+		}
 	}
 	return c;
 }
@@ -1049,8 +1068,13 @@ void rxd_intr(void){
 		}
 	while(!(UART0_FR_R & UART_FR_RXFE)){			// process RXD chrs
 		c = UART0_DR_R;
-		if((c >= ' ') || (c == ESC)) bchar = c;		// if not nul, set global char escape reg
-		rxd_buff[rxd_hptr++] = c;					// feed the buffer
+//		if((c >= ' ') || (c == ESC)) bchar = c;		// if not nul, set global char escape reg
+		if((c == EOL) || (c == LF)){
+			rxd_buff[rxd_hptr++] = '\0';			// EOL
+			rxd_mcnt++;
+		}else{
+			rxd_buff[rxd_hptr++] = c;				// feed the buffer
+		}
 		if(rxd_hptr >= RXD0_BUFF_END){
 			rxd_hptr = 0;							// wrap buffer ptr
 		}
@@ -1117,9 +1141,9 @@ void Timer1A_ISR(void)
 
 //    GPIO_PORTD_DATA_R ^= SPARE4;
 
-	if(TIMER1_MIS_R & TIMER_MIS_TATOMIS){
+/*	if(TIMER1_MIS_R & TIMER_MIS_TATOMIS){
 		txd1_rdy = 1;
-	}
+	}*/
 	TIMER1_ICR_R = TIMER1_MIS_R & TIMERA_MIS_MASK;
     return;
 }

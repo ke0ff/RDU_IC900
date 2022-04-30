@@ -1,5 +1,5 @@
 /********************************************************************
- ************ COPYRIGHT (c) 2021 by ke0ff, Taylor, TX   *************
+ ************ COPYRIGHT (c) 2022 by ke0ff, Taylor, TX   *************
  *
  *  File name: main.c
  *
@@ -13,7 +13,7 @@
 /********************************************************************
  *  Project scope rev notes:
  *    				 To-do Checklist time!
- *    				 !!! there is a noticable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
+ *    				 !!! there is a noticeable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
  *    				 !!! Need to come up with a re-start sequence without power cycling if the BERR is resolved.
  *    				 !!! mem scan needs to disable string disp mode...
  *
@@ -26,6 +26,15 @@
  *
  *
  *    Project scope rev History:
+ *    04-10-22 jmh:  Explored fixes to OFFS edit function while in MEM mode. Simplified key pre-processing (test_for_cancel) to remove deep if-else constructs and
+ *    					greatly improve editability of the construct. Prioritized DUP key above MHz key to address conflict in test_for_cancel logic. Also changed
+ *    					process_DIAL() to accommodate OFFS change while in mem mode.
+ *    					- broke out disp_duplex() to code reduce the DUP icon update process.
+ *    					- interleaved OFFS mode into MHZ process
+ *    					- modified test_for_cancel() to remove if-else nests and added OFFS-CANCEL trap
+ *    					- broke out freq_update() to code reduce LCD frequency update process
+ *    <VERSION 0.11>
+ *
  *    10-18-21 jmh:	 Modified slide switch processing (lcd.c => process_UI()) to correct an unfortunate misapplication of parenthesis. Now the dim/brt
  *						switch seems to work.
  *    10-10-21 jmh:	 Modified MSchr to update both MAIN and SUB.
@@ -310,6 +319,7 @@ S8		xoffsent;						// xoff sent
 //-----------------------------------------------------------------------------
 U32		abaud;							// 0 = 115.2kb (the default)
 U8		iplt2;							// timer2 ipl flag
+U8		btredir;						// bluetooth cmd re-direct flag
 U16		waittimer;						// gp wait timer
 U16		waittimer2;						// gp wait timer
 U8		dialtimer;						// dial debounce wait timer
@@ -334,6 +344,7 @@ U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
 U8		idx;
 U16		ipl;							// initial power on state
+char	btbuf[100];						// temp buffer
 
 #define KBD_ERR 0x01
 #define KBD_BUFF_END 5
@@ -452,6 +463,7 @@ int main(void){
         set_led(6, 1);
         set_pwm(6, 10);
     	process_IO(0xff);								// init process_io
+    	btredir = 0;
     	// GPIO init
     	//...
     	swcmd = 0;										// init SW command
@@ -546,6 +558,7 @@ char *gets_tab(char *buf, char *save_buf[], int n){
 	char	*cp;
 	char	*sp;
 	char	c;
+	char	q;
 	int		i = 0;
 	U8		j;
 	static	U8   rebuf_num;
@@ -560,107 +573,131 @@ char *gets_tab(char *buf, char *save_buf[], int n){
     cp = buf;
     sp = save_buf[rebuf_num];
     do{
-        c = getch0Q();
-        switch(c){
-			case 0xE0:									// look for 19.2kb autoselect
-				if(last_chr == 0xE0){
-					abaud = 19200L;
-					c = '\r';
-				}
-				break;
+    	do{
+    		q = process_IO(0);
+    		c = getch0Q();
+    		if(gotmsgn()){
+    			getss(btbuf);
+    			if(*btbuf){
+        			putssQ("{");
+        			putssQ(btbuf);
+        			putsQ("}");
+    			}
+    		}
+    	}while(!c && !q);
+    	if(!q){
+            switch(c){
+    			case 0xE0:									// look for 19.2kb autoselect
+    				if(last_chr == 0xE0){
+    					abaud = 19200L;
+    					c = '\r';
+    				}
+    				break;
 
-			case 0x00:									// look for 38.4kb or 9600b autoselect
-				if(last_chr == 0x1C){
-					abaud = 38400L;
-					c = '\r';
-				}else{
-					if(last_chr == 0x00){
-						abaud = 9600L;
-						c = '\r';
-					}
-				}
-				break;
+    			case 0x00:									// look for 38.4kb or 9600b autoselect
+    				if(last_chr == 0x1C){
+    					abaud = 38400L;
+    					c = '\r';
+    				}else{
+    					if(last_chr == 0x00){
+    						abaud = 9600L;
+    						c = '\r';
+    					}
+    				}
+    				break;
 
-			case 0x80:									// look for 57.6kb autoselect
-				if(last_chr == 0xE6){
-					abaud = 57600L;
-					c = '\r';
-				}
-				break;
+    			case 0x80:									// look for 57.6kb autoselect
+    				if(last_chr == 0xE6){
+    					abaud = 57600L;
+    					c = '\r';
+    				}
+    				break;
 
-            case '\t':
-				if(i != 0){								// if tab, cycle through saved cmd buffers
-					do{
-						i--;							// update count/point
-						cp--;
-						if((*cp >= ' ') && (*cp <= '~')){
-							putcharQ('\b');				// erase last chr if it was printable
-							putcharQ(' ');
-							putcharQ('\b');
-						}
-					}while(i != 0);
-					cp = buf;							// just in case we got out of synch
-				}
-				//copy saved string up to first nul, \n, or \r
-				j = rebuf_num;
-				do{
-					if(--rebuf_num == 0xff){
-						rebuf_num = MAX_REBUF - 1;
-					}
-					if(*save_buf[rebuf_num]) j = rebuf_num;
-				}while(j != rebuf_num);
-				sp = save_buf[rebuf_num];
-				while((*sp != '\0') && (*sp != '\r') && (*sp != '\n')){
-					putdchQ(*sp);
-					*cp++ = *sp++;
-					i++;
-				}
-                break;
+                case '\t':
+    				if(i != 0){								// if tab, cycle through saved cmd buffers
+    					do{
+    						i--;							// update count/point
+    						cp--;
+    						if((*cp >= ' ') && (*cp <= '~')){
+    							putcharQ('\b');				// erase last chr if it was printable
+    							putcharQ(' ');
+    							putcharQ('\b');
+    						}
+    					}while(i != 0);
+    					cp = buf;							// just in case we got out of synch
+    				}
+    				//copy saved string up to first nul, \n, or \r
+    				j = rebuf_num;
+    				do{
+    					if(--rebuf_num == 0xff){
+    						rebuf_num = MAX_REBUF - 1;
+    					}
+    					if(*save_buf[rebuf_num]) j = rebuf_num;
+    				}while(j != rebuf_num);
+    				sp = save_buf[rebuf_num];
+    				while((*sp != '\0') && (*sp != '\r') && (*sp != '\n')){
+    					putdchQ(*sp);
+    					*cp++ = *sp++;
+    					i++;
+    				}
+                    break;
 
-            case '\b':
-            case 0x7f:
-                if(i != 0){								// if bs & not start of line,
-                    i--;								// update count/point
-                    cp--;
-                    if((*cp >= ' ') && (*cp <= '~')){
-                        putcharQ('\b');					// erase last chr if it was printable
-                        putcharQ(' ');
-                        putcharQ('\b');
+                case '\b':
+                case 0x7f:
+                    if(i != 0){								// if bs & not start of line,
+                        i--;								// update count/point
+                        cp--;
+                        if((*cp >= ' ') && (*cp <= '~')){
+                            putcharQ('\b');					// erase last chr if it was printable
+                            putcharQ(' ');
+                            putcharQ('\b');
+                        }
                     }
-                }
-                break;
+                    break;
 
-            case '\r':									// if cr, nul term buf & exit
-            case '\n':									// if nl, nul term buf & exit
-                i++;
-                *cp++ = c;
-                break;
+                case '\r':									// if cr, nul term buf & exit
+                case '\n':									// if nl, nul term buf & exit
+                    i++;
+                    *cp++ = c;
+                    break;
 
-            case ESC:									// if esc, nul buf & exit
-                cp = buf;
-                c = '\r';								// set escape condition
-				i = 0;
-                break;
+                case ESC:									// if esc, nul buf & exit
+                    cp = buf;
+                    c = '\r';								// set escape condition
+    				i = 0;
+                    break;
 
-            default:
-                i++;
-                *cp++ = c;								// put chr in buf
-                putdchQ(c);								// no cntl chrs here
-                break;
-        }
-		last_chr = c;									// set last chr
-    } while((c != '\r') && (c != '\n') && (i < CLI_BUFLEN));		// loop until c/r or l/f or buffer full
-	if(i >= CLI_BUFLEN){
-		putsQ("!! buffer overflow !!");
-		*buf = '\0';									// abort line
-	}else{
-		putsQ("");										// echo end of line to screen
-		*cp = '\0';										// terminate command line
-		if((*buf >= ' ') && (*buf <= '~')){				// if new buf not empty (ie, 1st chr = printable),
-			strncpy(save_buf[rebuf_num], buf, n);		// copy new buf to save
-			if(++rebuf_num >= MAX_REBUF) rebuf_num = 0;
-		}
-	}
+                case BT_LN:									// if bluetooth cmd, do nothing
+                    break;
+
+                default:
+                    i++;
+                    *cp++ = c;								// put chr in buf
+                    putdchQ(c);								// no cntl chrs here
+                    break;
+            }
+    	}
+		if(c != BT_LN) last_chr = c;					// set last chr
+    } while((c != '\r') && (c != '\n') && (i < CLI_BUFLEN) && (c != BT_LN));		// loop until c/r or l/f or buffer full
+    if(c == BT_LN){
+    	if(btredir){
+    		buf = get_btptr();
+    	}else{
+//        		process_CCMD(0);
+    	}
+    }else{
+    	if(i >= CLI_BUFLEN){
+    		putsQ("!! buffer overflow !!");
+    		*buf = '\0';								// abort line
+    	}else{
+    		putsQ("");									// echo end of line to screen
+    		*cp = '\0';									// terminate command line
+    		if((*buf >= ' ') && (*buf <= '~')){			// if new buf not empty (ie, 1st chr = printable),
+    			strncpy(save_buf[rebuf_num], buf, n);	// copy new buf to save
+    			if(++rebuf_num >= MAX_REBUF) rebuf_num = 0;
+    		}
+    	}
+    }
     return buf;
 }
 

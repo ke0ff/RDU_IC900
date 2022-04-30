@@ -1,5 +1,5 @@
 /********************************************************************
- ************ COPYRIGHT (c) 2021 by KE0FF, Taylor, TX   *************
+ ************ COPYRIGHT (c) 2022 by KE0FF, Taylor, TX   *************
  *
  *  File name: lcd.h
  *
@@ -36,11 +36,20 @@
 #define	VMODE_ISTX		0x40	// tx mode
 #define	VMODE_ODISP		0x80	// display offset
 
+// cancel vector defines
+#define	OFFS_CANCEL		0x80
+#define	CHK_CANCEL		0x40
+#define	TONE_CANCEL		0x20
+#define	MHZ_CANCEL		0x10
+#define	VQ_CANCEL		0x08
+#define	TS_CANCEL		0x04
+
 // process_VFODISP defines
 #define	TONE_DISP		0x01
 #define	TS_DISP			0x02
 #define	NORM_DISP		0x03
 #define	TXTSLID_DISP	0x04
+#define	OFFS_DISP		0x05
 
 //#define VFOTR_IS_TX		0x40	// flag to signal fetch of vfotr to display TX frequency from uxpll update
 //#define VFO_DISP_F		0x80	// flag to signal vfo display update
@@ -56,6 +65,7 @@
 #define	MSCANS_XFLAG	0x80
 
 // Xz-flags
+//#define	OFFS_XFLAG	0x80
 #define	MSCANM1_XFLAG	0x40		// mem scan first active flags (M/S)
 #define	MSCANS1_XFLAG	0x80
 

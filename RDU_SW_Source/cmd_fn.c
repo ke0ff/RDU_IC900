@@ -1,5 +1,5 @@
 /********************************************************************
- ************ COPYRIGHT (c) 2016 by ke0ff, Taylor, TX   *************
+ ************ COPYRIGHT (c) 2022 by ke0ff, Taylor, TX   *************
  *
  *  File name: cmd_fn.c
  *
@@ -59,12 +59,12 @@ enum err_enum{ no_response, no_device, target_timeout };
 // enum list of command numerics
 //	each enum corresponds to a command from the above list (lastcmd corresponds
 //	with the last entry, 0xff)
-//                                                           1     1     1   1   1  1   1     1    1   2  2  2  2
-//                        0  1  2  3   4   5  6  7  8  9  0  1     2     3   4   5  6   7     8    9   0  1  2  3
-const char cmd_list[] = {"B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0STO\0TI\0T\0?\0H\0VERS\0\xff"};
-//             0      1       2       3       4       5       6      7       8       9       10       11   12   13   14   15    16       17       18
-enum cmd_enum{ beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,sto_mem,
-//             19        20      21    22    23
+//                                                            1     1     1   1   1  1   1     1    1   2  2  2  2  2
+//                        0   1  2  3   4   5  6  7  8  9  0  1     2     3   4   5  6   7     8    9   0  1  2  3  4
+const char cmd_list[] = {"BT\0B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0STO\0TI\0T\0?\0H\0VERS\0\xff"};
+//             0      1      2       3       4       5       6      7       8       9       10      11       12   13   14   15   16    17       18       19
+enum cmd_enum{ bttest,beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,sto_mem,
+//             20        21      22    23    24
 			   timer_tst,trig_la,help1,help2,vers,lastcmd,helpcmd };
 
 #define	cmd_type	char	// define as char for list < 255, else define as int
@@ -295,19 +295,41 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					dispSWvers();
 					break;
 
+				case bttest:
+					putsQ("BTtst");
+/*					if(gotmsgn()){
+						getss(obuf);
+						putssQ("{");
+						putsQ(obuf);
+						putssQ("}");
+					}*/
+					putss(args[1]);
+//					putssQ(args[1]);
+//					wait(1100);
+//					putss("\r");
+/*					do{
+						if(gotmsgn(0)){
+							putsQ(get_btptr());
+							clr_btptr();
+							gotmsgn(1);
+						}
+					}while(bchar != ESC);*/
+//					putss("---\r");
+					break;
+
 				case mstr:														// mem string: p[0] = band+1, p[1] = mem#, p[2] = string
 					params[0] = 0;
 					params[1] = 0;
 					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
 					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
-					if(--params[0] > 5) params[1] = MAX_MEM;
-					if(params[1] < MAX_MEM){
+					if(--params[0] > 5) params[1] = NUM_MEMS;
+					if(params[1] < NUM_MEMS){
 						ii = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR;			// band/mem#
 						if(args[3][0] != '\0'){									// copy new string to NVRAM
 							j = CS_WRITE | CS_OPEN;
 							for(i=0; i<MEM_NAME_LEN; i++){
 								if(i == (MEM_NAME_LEN - 1)) j = CS_WRITE | CS_CLOSE;
-								gp_buf[i] = rw8_nvr(ii, args[3][i], j);
+								rw8_nvr(ii, args[3][i], j);
 								j = CS_WRITE;
 							}
 						}
@@ -317,31 +339,32 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							gp_buf[i] = rw8_nvr(ii, 0, j);
 							j = CS_READ;
 						}
-						if(params[1] < MAX_MEM){
+//						if(params[1] < NUM_MEMS){
 							sprintf(obuf,"MEM String, %s: #: %c, '%s'\n", band_str[params[0]], ordinal2mem(params[1]), gp_buf);
 							putsQ(obuf);
-						}else{
-							putsQ("!Error!");
-						}
+//						}else{
+//							putsQ("!Error!");
+//						}
 					}else{
 						putsQ("!Error!");
 					}
 					break;
-																				// VFO + OFFS + DPLX + CTCSS + SQ + VOL + XIT + RIT + BID + MEM_NAME + STR_CHKS
+																				// str = "VFO + OFFS + DPLX/pwr/skip + CTCSS + SQ + VOL + XIT + RIT + BID-1 + !MEM_NAME! + STR_CHKS"
 																				// if STR_CHKS omitted or is incorrect, an error is reported, but the cmd line processes anyway
-																				// STO 3 A XX "1296000 20000 S/P/M 103.5 34 34 -7 +7 5 !1234567890123456!"
+																				// STO 3 A XX "1296000 20000 nn 103.5 34 34 -7 +7 5 !1234567890123456!"
 																				// 1234567890123456789012345678901234567890123456789012345678901234567890
 																				//          1         2         3         4         5         6         7
-				case sto_mem:													// store mem: p[0] = band+1, p[1] = mem#, a[3] = mem_param_string
-					params[0] = 0;								// band#		// STO <nnum> <mchr> "str"
+				case sto_mem:													// store mem: p[0] = band, p[1] = mem#, p[2] = chks, a[4] = mem_param_string
+					params[0] = 0;								// band#		// STO <nnum> <mchr> <chks> "str"
 					params[2] = 0;								// checks		//
 					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
 					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
-					if(--params[0] > 5) params[1] = MAX_MEM;
-					if(params[1] < MAX_MEM){
+					if(--params[0] > 5) params[1] = NUM_MEMS;
+					if(params[1] < NUM_MEMS){
 //						ii = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR; // band/mem#
 //						sscanf(args[3],"%d %d %c %f", &ii, &hh, &c, &fa);
-						sscanf(args[4],"%d %d %x %f %d %d %d %d %d %s", &ii, &hh, &mem_buf8[0], &fa, &mem_buf8[2], &mem_buf8[3], &mem_buf8[4], &mem_buf8[5], &mem_buf8[6], gp_buf);
+//																		frq  ofs  dplx/pwr/skp  pl   sq            vol           xit           rit           bid           namestr
+						sscanf(args[4],"%d %d %d %f %d %d %d %d %d %s", &ii, &hh, &mem_buf8[0], &fa, &mem_buf8[2], &mem_buf8[3], &mem_buf8[4], &mem_buf8[5], &mem_buf8[6], gp_buf);
 						l = (U8)mem_buf8[0];
 						k = (U16)(fa * 10.0);
 
@@ -384,24 +407,27 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						sprintf(obuf,"  B_ID: %d", mem_buf8[6]);
 						putsQ(obuf);
 						if(!(l & SCANEN_F)) putsQ("  SKIP: ON");
+						else putsQ("  SKIP: off");
 						if(params[2] != kk){									// checks test
 							sprintf(obuf,"CHKS error = %d", kk);
 							putsQ(obuf);
 						}else{
 							kk = get_memaddr((U8)params[0], (U8)params[1]);
-							rw32_nvr(kk, ii, CS_WRITE|CS_OPEN);
-							rw16_nvr(kk, (U16)hh, CS_WRITE);
-							rw8_nvr(kk, (U8)mem_buf8[0], CS_WRITE);
-							rw8_nvr(kk, lookup_pl(k)+1, CS_WRITE);
-							rw8_nvr(kk, (U8)mem_buf8[2], CS_WRITE);
+							rw32_nvr(kk, ii, CS_WRITE|CS_OPEN);						// write freq
+							rw16_nvr(kk, (U16)hh, CS_WRITE);						// write offs
+							rw8_nvr(kk, (U8)mem_buf8[0], CS_WRITE);					// duplex/pwr/skip
+							rw8_nvr(kk, lookup_pl(k)+1, CS_WRITE);					// PL tone code
+							rw8_nvr(kk, (U8)mem_buf8[2], CS_WRITE);					// sq
 							rw8_nvr(kk, 0, CS_WRITE);								// vol deprecated (vfo_p[band].vol now a spare) //
-							rw8_nvr(kk, (U8)mem_buf8[4], CS_WRITE);
-							rw8_nvr(kk, (U8)mem_buf8[5], CS_WRITE);
-							rw8_nvr(kk, (U8)mem_buf8[6], CS_WRITE);
-							j = CS_WRITE;
+							rw8_nvr(kk, (U8)mem_buf8[4], CS_WRITE);					// xit
+							rw8_nvr(kk, (U8)mem_buf8[5], CS_WRITE);					// rit
+							rw8_nvr(kk, (U8)mem_buf8[6], CS_WRITE|CS_CLOSE);					// bid
+							kk = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR;			// band/mem#
+							j = CS_WRITE | CS_OPEN;											// namestr
 							for(i=0; i<MEM_NAME_LEN; i++){
-								if(i == (MEM_NAME_LEN - 1)) j |= CS_CLOSE;
+								if(i == (MEM_NAME_LEN - 1)) j = CS_WRITE | CS_CLOSE;
 								rw8_nvr(kk, *t++, j);
+								j = CS_WRITE;
 							}
 						}
 					}else{
@@ -906,12 +932,12 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							ii = 0;												// clear string ready flag
 							t = args[1];										// point to start of param string
 						}
-						if(gotmsgn()){
+//						if(gotmsgn()){
 							s = gets(obuf);									// get recvd data
 							*s = '\0';											// add EOS
 							putsQ("Rcvd: ");									// display rcvd string
 							putsNQ(obuf);										// display with hex expanded
-						}
+//						}
 						if(gotchr()){
 							c = getchr();
 							*t++ = c;											// re-fill buffer

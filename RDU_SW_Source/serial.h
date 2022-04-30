@@ -44,11 +44,15 @@
 #define TXD_CERR		0x20			// tx data error (collision)
 #define TXD_JAMMER		0x40			// jammer code detect
 #define TXD_SND			0x80			// tx data sending
+
+#define BT_LN	0xbe					// bluetooth EOL internal flag
 #define SOH		0x01
 #define ETX		0x03
 #define	EOT		0x04
 #define AKN		0x06
 #define	EOM1	13						// <CR> is EOM1
+#define	EOL		'\r'					// <CR> is EOL
+#define	LF		'\n'					// <LF> is EOL
 #define DLE		0x10
 #define XON		0x11
 #define XOFF	0x13
@@ -140,12 +144,15 @@ int putss(const char *string);
 int puts0(const char *string);
 int putsN(const char *string);
 char getch00(void);
+char* getss(char* dptr);
 //char xmode_off(void);
 //U16 calcrc(char c, U16 oldcrc, U16 poly);
 char is_xmode(void);
 char putchar_b(char c);
 U32 init_uart0(U32 baud);
 char set_baud(U32 baud);
+char* get_btptr(void);
+void clr_btptr(void);
 
 U32 init_uart1(U32 baud);
 U32 config_uart1(U32 baud);
@@ -154,7 +161,6 @@ char putchar1(char c);
 char getchr1(void);
 char gotchr1(void);
 //U8 goteom1(void);
-U8 gotmsgn1(void);
 //int puts1(const char *string);
 int puts1(const char *string);
 char* gets1(char *string);

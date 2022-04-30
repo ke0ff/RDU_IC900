@@ -2238,12 +2238,14 @@ void read_nvmem(U8 band, U8 memnum){
 	rw8_nvr(addr, 0, j);								// deprecated !!! this will be a recall of the spare: vfo_p[band].spare//
 	ux129_xit = rw8_nvr(addr, 0, j);
 	ux129_rit = rw8_nvr(addr, 0, j);
-	band = rw8_nvr(addr, 0, j);
+//	band = rw8_nvr(addr, 0, j);
+	i = rw8_nvr(addr, 0, j);
 	cptr = memname[band];
 	for(i=0; i<MEM_NAME_LEN; i++){
 		if(i == (MEM_NAME_LEN - 1)) j |= CS_CLOSE;
 		*cptr++ = rw8_nvr(addr, 0, j);
 	}
+	*cptr = '\0';
 	return;
 }
 
@@ -2329,9 +2331,10 @@ void set_bandid(U8 focus, U8 b_id){
 // get_nameptr() returns pointer to name string
 //-----------------------------------------------------------------------------
 char* get_nameptr(U8 focus){
+	char* nptr = memname[bandid_s];
 
-	if(focus == MAIN) return memname[bandid_m];
-	else return memname[bandid_s];
+	if(focus == MAIN) nptr = memname[bandid_m];
+	return nptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

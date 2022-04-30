@@ -1,5 +1,5 @@
 /********************************************************************
- ************ COPYRIGHT (c) 2019 by ke0ff, Taylor, TX   *************
+ ************ COPYRIGHT (c) 2022 by ke0ff, Taylor, TX   *************
  *
  *  File name: ccmd.c
  *
@@ -109,7 +109,8 @@ void process_CCMD(U8 cmd){
 		puts1(ccbuf);
 		return;
 	}
-	if(gotmsgn1()){								// if ccmd received, process here...
+//	if(gotmsgn1()){								// if ccmd received, process here...
+	if(0){								// if ccmd received, process here...
 		// process ccmds
 		ptr = ccbuf;							// set pointer to local buffer
 		gets1(ptr);								// xfr message string to local buffer

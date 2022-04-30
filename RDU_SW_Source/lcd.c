@@ -1,5 +1,5 @@
 /********************************************************************
- ************ COPYRIGHT (c) 2021 by ke0ff, Taylor, TX   *************
+ ************ COPYRIGHT (c) 2022 by ke0ff, Taylor, TX   *************
  *
  *  File name: serial.c
  *
@@ -112,9 +112,11 @@ U32 bin32_bcdp(U32 bin32);
 void lamp_test(U8 tf);
 void update_lcd(U8 focus, U8 forced_focus);
 U8 process_MS(U8 cmd);
+void disp_duplex(U8 focus, U8 duplex);
 void process_VFODISP(U8 focus);
 U8 test_for_cancel(U8 key);
 U32 process_DIAL(U8 focus);
+void freq_update(U8 focus, S8 step);
 U8 process_MEM(U8 cmd);
 U8 process_SET(U8 cmd);
 void ats(U8 tf);
@@ -387,7 +389,7 @@ U8 process_MS(U8 mode){
 	static	 U8		hflag;
 	U8	b;					// key beep counter
 	U8	i;					// temp
-	U8	j;					// temp
+//	U8	j;					// temp
 	U8	k;					// temp
 	U32	ii;
 	volatile U32	sin_a0;
@@ -578,36 +580,15 @@ U8 process_MS(U8 mode){
 			b = 1;
 			switch(i){													// dispatch to key-specific code segments...
 			case DUPchr:												// duplex button, initial press
-				if(band_focus == MAIN_MODE){
-					switch(inc_dplx(MAIN) & (DPLX_MASK)){				// advance the duplex (function returns changed status)
-					default:
-					case DPLX_S:
-						mdupa('S');
-						break;
-
-					case DPLX_P:
-						mdupa('+');
-						break;
-
-					case DPLX_M:
-						mdupa('-');
-						break;
-					}
+				if(offs_time(0)){
+					offs_time(0xff);									// cancel duplex adjust
 				}else{
-					switch(inc_dplx(SUB) & (DPLX_MASK)){
-					default:
-					case DPLX_S:
-						sdupa('S');
-						break;
-
-					case DPLX_P:
-						sdupa('+');
-						break;
-
-					case DPLX_M:
-						sdupa('-');
-						break;
+					if(band_focus == MAIN_MODE){
+						i = inc_dplx(MAIN);								// advance the duplex (function returns changed status)
+					}else{
+						i = inc_dplx(SUB);
 					}
+					disp_duplex(band_focus, i);								// update LCD
 				}
 				// if tx
 				force_push();											// force update to NVRAM
@@ -662,8 +643,8 @@ U8 process_MS(U8 mode){
 				break;
 
 			case MHZchr:												// MHZ button 1st press
-				if(!(xmode[k] & MC_XFLAG)){								// if in mem/call mode, go to string slide mode check...
-					if(!mhz_time(0)){									// if timer is not zero, one of the MHz modes is active
+				if(!(xmode[k] & MC_XFLAG) || (xmodeq & OFFS_XFLAG)){	// if in mem/call mode, go to string slide mode check...
+					if(!mhz_time(0) && !offs_time(0)){					// if timers are not zero, one of the MHz modes is active
 						if(maddr == MHZ_OFF){							// this means that the thumbwheel mode isn't active and MHz mode is off
 							maddr = MHZ_ONE;							// set MHz mode
 							amhz(1);									// turn on mhz icon
@@ -676,18 +657,27 @@ U8 process_MS(U8 mode){
 						for(i=0; i<maddr ; i++){						// construct the multiplier for the currently selected digit
 							sii *= 10;
 						}
-						if(maddr == 0) sii = 5;							// lowest digit can only be 0 or 5 (these are all 5KHz stepped radios, except for the UX129 which is a 10 KHz step)
-						set_mhz_step(sii);								// store the step mulitplier
+						if((maddr & MHZ_MASK) == 0) sii = 5;			// lowest digit can only be 0 or 5 (these are all 5KHz stepped radios, except for the UX129 which is a 10 KHz step)
+						set_mhz_step(sii);								// store the step multiplier
 //						else set_mhz_step(sii / 10L);
 //						i = set_mhz_addr(0xff);
 						if(band_focus == MAIN_MODE) digblink(MAIN_CS|maddr,0); // un-blink the old digit (m/s)
 						else digblink(maddr,0);
-						if(--maddr == 0xff){							// move the digit and process roll-under
+						i = maddr;
+						if(((--maddr) & MHZ_MASK) == MHZ_MASK){			// move the digit and process roll-under
 							if(get_band_index(band_focus) == ID1200_IDX){
-								maddr = 5;
+								if((maddr & ~MHZ_MASK) == ~MHZ_MASK){
+									maddr = 5;
+								}else{
+									maddr = (i & ~MHZ_MASK) | 5;
+								}
 								set_mhz_step(100000L);
 							}else{
-								maddr = 4;
+								if((maddr & ~MHZ_MASK) == ~MHZ_MASK){
+									maddr = 4;
+								}else{
+									maddr = (i & ~MHZ_MASK) | 4;
+								}
 								set_mhz_step(10000L);
 							}
 						}
@@ -872,25 +862,26 @@ U8 process_MS(U8 mode){
 				// undo the duplex press
 				if(band_focus == MAIN_MODE){
 					inc_dplx(MAIN);
-					inc_dplx(MAIN);
+					i = inc_dplx(MAIN);
 					mfreq((U32)get_offs(band_focus), LEAD0);
 				}else{
 					inc_dplx(SUB);
-					inc_dplx(SUB);
+					i = inc_dplx(SUB);
 					sfreq((U32)get_offs(band_focus), LEAD0);
 				}
+				disp_duplex(band_focus, i);								// update LCD
 				mhz_time(1);
 				offs_time(1);
 				set_mhz_step(100000L);
 				if(get_band_index(band_focus) == ID1200_IDX){
-					maddr = MHZ_OFFS|5;
-				}else{
 					maddr = MHZ_OFFS|4;
+				}else{
+					maddr = MHZ_OFFS|3;
 				}
 				if(band_focus == MAIN_MODE) digblink(MAIN_CS|(maddr&(~MHZ_OFFS)),1);
 				else digblink(maddr&(~MHZ_OFFS),1);
 				xmodeq |= OFFS_XFLAG;
-//				update_lcd();
+//				update_lcd(band_focus, band_focus);
 				b = 2;	// 2beeps
 				break;
 
@@ -982,7 +973,7 @@ U8 process_MS(U8 mode){
 					xmode[k] |= MEM_XFLAG;
 				}
 				i = get_last_cos(band_focus);
-				j = i >> 5;
+//				j = i >> 5;
 				i &= 0x1f;
 				read_mem(band_focus, get_memnum(band_focus, 0));
 				write_xmode(band_focus);
@@ -1124,6 +1115,44 @@ U8 process_MS(U8 mode){
 	return band_focus;
 }	// end process_MS()
 
+//-----------------------------------------------------------------------------
+// disp_duplex() updates duplex LCD icons based on duplex and focus
+//	duplex is the return value of the last call to inc_dplx()
+//-----------------------------------------------------------------------------
+void disp_duplex(U8 focus, U8 duplex){
+	if(focus == MAIN_MODE){
+		switch(duplex & (DPLX_MASK)){
+		default:
+		case DPLX_S:
+			mdupa('S');
+			break;
+
+		case DPLX_P:
+			mdupa('+');
+			break;
+
+		case DPLX_M:
+			mdupa('-');
+			break;
+		}
+	}else{
+		switch(duplex & (DPLX_MASK)){
+		default:
+		case DPLX_S:
+			sdupa('S');
+			break;
+
+		case DPLX_P:
+			sdupa('+');
+			break;
+
+		case DPLX_M:
+			sdupa('-');
+			break;
+		}
+	}
+	return;
+}
 
 //-----------------------------------------------------------------------------
 // process_VFODISP() process freq display options
@@ -1248,37 +1277,50 @@ void process_VFODISP(U8 focus){
 //	called from top of key dispatch tree
 //-----------------------------------------------------------------------------
 U8 test_for_cancel(U8 key){
-	U8	i = key;		// temp
+	U8	i = key;		// temps
+	U8	m = 0;
+	U8	vector;
 
-	if((maddr & ~MHZ_OFFS) < MHZ_OFF){					//	force the MHZ-hold key-code (this clears by-digit mode)
-		switch(key){									// process thumbwheel key-cancel
-		case Vupchr:									// don't cancel on these codes:
-		case Vdnchr:									// VOLu/d, SQUu/d, MHz, DUP(release)
-		case Vupchr_H:
-		case Vdnchr_H:
-		case Vdnchr_R:
-		case Vupchr_R:
-		case Qupchr:
-		case Qdnchr:
-		case Qupchr_H:
-		case Qdnchr_H:
-		case Qupchr_R:
-		case Qdnchr_R:
-		case MHZchr:
-		case MHZchr_H:
-		case MHZchr_R:
-		case DUPchr_R:
-			break;
-
-		default:										// for all other keys, modify to abort MHz digit mode cancel
-			i = MHZchr_H;
-			break;
+	if((maddr & ~MHZ_OFFS) < MHZ_OFF) m |= MHZ_CANCEL;		//	force the MHZ-hold key-code (this clears by-digit mode)
+	if(chkmode) m |= CHK_CANCEL;							// for check mode, CHKchr is cancel
+	if(xmodeq & TONE_XFLAG) m |= TONE_CANCEL;
+	if(xmodeq & OFFS_XFLAG) m |= OFFS_CANCEL;
+	if(xmodeq & (VOL_XFLAG|SQU_XFLAG)) m |= VQ_CANCEL;
+	if(tsdisplay) m |= TS_CANCEL;
+	if(m){
+		vector = 0x80;
+		while(!(m & vector)){
+			vector >>= 1;
 		}
-	}else{
-		if(chkmode){									// for check mode, CHKchr is cancel
-			switch(key){								// process thumbwheel key-cancel
-			case Vupchr:								// don't cancel on these codes:
-			case Vdnchr:								// VOLu/d, SQUu/d, CHECK
+		if(vector == MHZ_CANCEL){							//	force the MHZ-hold key-code (this clears by-digit mode)
+			switch(key){									// process thumbwheel key-cancel
+			case Vupchr:									// don't cancel on these codes:
+			case Vdnchr:									// VOLu/d, SQUu/d, MHz, DUP(release)
+			case Vupchr_H:
+			case Vdnchr_H:
+			case Vdnchr_R:
+			case Vupchr_R:
+			case Qupchr:
+			case Qdnchr:
+			case Qupchr_H:
+			case Qdnchr_H:
+			case Qupchr_R:
+			case Qdnchr_R:
+			case MHZchr:
+			case MHZchr_H:
+			case MHZchr_R:
+			case DUPchr_R:
+				break;
+
+			default:										// for all other keys, modify to abort MHz digit mode cancel
+				i = MHZchr_H;
+				break;
+			}
+		}
+		if(vector == CHK_CANCEL){							// for check mode, CHKchr is cancel
+			switch(key){									// process thumbwheel key-cancel
+			case Vupchr:									// don't cancel on these codes:
+			case Vdnchr:									// VOLu/d, SQUu/d, CHECK
 			case Vupchr_H:
 			case Vdnchr_H:
 			case Vdnchr_R:
@@ -1294,79 +1336,103 @@ U8 test_for_cancel(U8 key){
 			case CHKchr_R:
 				break;
 
-			default:									// for all other keys, modify to chk/rev cancel
+			default:										// for all other keys, modify to chk/rev cancel
 				i = CHKchr;
 				break;
 			}
-		}else{
-			if(xmodeq & TONE_XFLAG){
-				switch(key){								// process TONE adjust key-cancel
-				case Vupchr:								// don't cancel on these codes:
-				case Vdnchr:								// VOLu/d, SQUu/d, TONE
-				case Vupchr_H:
-				case Vdnchr_H:
-				case Vdnchr_R:
-				case Vupchr_R:
-				case Qupchr:
-				case Qdnchr:
-				case Qupchr_H:
-				case Qdnchr_H:
-				case Qupchr_R:
-				case Qdnchr_R:
-				case TONEchr:
-				case TONEchr_H:
-				case TONEchr_R:
-					break;
+		}
+		if(vector == TONE_CANCEL){
+			switch(key){									// process TONE adjust key-cancel
+			case Vupchr:									// don't cancel on these codes:
+			case Vdnchr:									// VOLu/d, SQUu/d, TONE
+			case Vupchr_H:
+			case Vdnchr_H:
+			case Vdnchr_R:
+			case Vupchr_R:
+			case Qupchr:
+			case Qdnchr:
+			case Qupchr_H:
+			case Qdnchr_H:
+			case Qupchr_R:
+			case Qdnchr_R:
+//			case TONEchr:
+			case TONEchr_H:
+			case TONEchr_R:
+				break;
 
-				default:									// for all other keys, modify to tone cancel
-					i = TONEchr;
-					break;
-				}
-			}else{
-				if(xmodeq & (VOL_XFLAG|SQU_XFLAG)){
-					switch(key){							// process V/Q adjust key-cancel
-					case SUBchr:
-					case MSchr:
-					case VFOchr:
-					case MRchr:
-					case CALLchr:
-					case SUBchr_H:
-					case MSchr_H:
-					case VFOchr_H:
-					case MRchr_H:
-					case CALLchr_H:
-					case SUBchr_R:
-					case MSchr_R:
-					case VFOchr_R:
-					case MRchr_R:
-					case CALLchr_R:
-						v_time(0xff);						// cancel vol/squ
-						q_time(0xff);
-						break;
+			default:										// for all other keys, modify to tone cancel
+				i = TONEchr;
+				break;
+			}
+		}
+		if(vector == OFFS_CANCEL){
+			switch(key){									// process OFFS adjust key-cancel
+			case Vupchr:									// don't cancel on these codes:
+			case Vdnchr:									// VOLu/d, SQUu/d, DUP
+			case Vupchr_H:
+			case Vdnchr_H:
+			case Vdnchr_R:
+			case Vupchr_R:
+			case Qupchr:
+			case Qdnchr:
+			case Qupchr_H:
+			case Qdnchr_H:
+			case Qupchr_R:
+			case Qdnchr_R:
+//			case DUPchr:
+			case DUPchr_H:
+			case DUPchr_R:
+			case MHZchr:
+			case MHZchr_H:
+			case MHZchr_R:
+				break;
 
-					default:								// for all other keys, modify to tone cancel
-						break;
-					}
-				}else{
-					if(tsdisplay){
-						switch(key){						// process TS adjust key-cancel
-						case SUBchr:						// these key codes cancel TS adj mode
-						case MSchr:
-						case VFOchr:
-						case MRchr:
-						case CALLchr:
-						case TONEchr_H:
-						case MHZchr:
-						case SETchr:
-						case DUPchr_H:
-							ts_time(0xff);					// cancel TS adj
-							break;
+			default:										// for all other keys, modify to tone cancel
+				i = DUPchr;
+				break;
+			}
+		}
+		if(vector == VQ_CANCEL){
+			switch(key){									// process V/Q adjust key-cancel
+			case SUBchr:									// these key codes cancel VQ adj mode
+			case MSchr:
+			case VFOchr:
+			case MRchr:
+			case CALLchr:
+			case SUBchr_H:
+			case MSchr_H:
+			case VFOchr_H:
+			case MRchr_H:
+			case CALLchr_H:
+			case SUBchr_R:
+			case MSchr_R:
+			case VFOchr_R:
+			case MRchr_R:
+			case CALLchr_R:
+				v_time(0xff);								// cancel vol/squ
+				q_time(0xff);
+				break;
 
-						default:							// for all other keys, modify to tone cancel
-							break;
-						}
-					}
-				}
+			default:										// for all other keys, no V/Q cancel
+				break;
+			}
+		}
+		if(vector == TS_CANCEL){
+			switch(key){									// process TS adjust key-cancel
+			case SUBchr:									// these key codes cancel TS adj mode
+			case MSchr:
+			case VFOchr:
+			case MRchr:
+			case CALLchr:
+			case TONEchr_H:
+			case MHZchr:
+			case SETchr:
+			case DUPchr_H:
+				ts_time(0xff);								// cancel TS adj
+				break;
+
+			default:										// for all other keys, no TS cancel
+				break;
 			}
 		}
 	}
@@ -1440,9 +1506,8 @@ void smute_action(U8* mute_flag){
 //-----------------------------------------------------------------------------
 U32 process_DIAL(U8 focus){
 	U8	i;					// temp
-	U8	j;
+	S8	j;					// command step, +/-1 = up/dn, 0 = no step.
 	U8	k;					// band index
-	U8	m;
 	U32	rflags = 0;			// return flags
 
 	k = get_band_index(focus);
@@ -1463,12 +1528,17 @@ U32 process_DIAL(U8 focus){
 			sub_time(1);								// reset timeout
 		}
 	}
-	if(xmodeq & TONE_XFLAG){
-		if(j){
-			adjust_tone(focus, j);
-			vfo_display |= VMODE_TDISP;
+//	if(xmodeq & (TONE_XFLAG|OFFS_XFLAG)){				// exception display for TONE or OFFS takes priority
+	if(xmodeq & TONE_XFLAG){				// exception display for TONE or OFFS takes priority
+		if(xmodeq & TONE_XFLAG){						// TONE
+			if(j){
+				adjust_tone(focus, j);
+				vfo_display |= VMODE_TDISP;
+			}
+			j = 0;										// allow sub-scan to operate
+//		}else{
+//			freq_update(focus, j);						// perform updates for offset adjust
 		}
-		j = 0;											// allow sub-scan to operate
 	}else{
 		if(tsdisplay){
 			// freq step select mode
@@ -1492,7 +1562,7 @@ U32 process_DIAL(U8 focus){
 		}else{
 			if(j){
 				// if focus and mem mode == active:
-				if(xmode[k] & (MC_XFLAG)){
+				if((xmode[k] & (MC_XFLAG)) && !(xmodeq & OFFS_XFLAG)){
 					// mem/call# inc/dec
 					if(focus == MAIN){
 						if(xmode[k] & CALL_XFLAG){
@@ -1521,40 +1591,7 @@ U32 process_DIAL(U8 focus){
 					else i = SUB_ALL;
 					update_radio_all(i);
 				}else{
-					// main freq update
-					if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
-						// MHZ (No thumbwheel) mode:
-						i = add_vfo(focus, j, maddr);					// update vfo
-						if(i && (focus == MAIN)){
-							mfreq(get_freq(MAIN), 0);					// update display
-						}
-						if(i && (focus == SUB)){
-							sfreq(get_freq(SUB), 0);
-						}
-						vfo_change(focus);
-					}else{
-						// digit-by-digit (thumbwheel) mode
-						m = maddr & (~MHZ_OFFS);						// mask offset mode flag
-						if(m == 0) j = (j & 0x01) * 5;					// pick the odd 5KHz
-						i = add_vfo(focus, j, maddr);					// update vfo
-						if(mhz_time(0)){
-							mhz_time(1);								// reset timer
-							if(maddr & MHZ_OFFS){
-								offs_time(1);
-							}
-						}
-						else{
-							mhz_time(0xff);								// exit MHz mode
-							offs_time(0xff);
-						}
-						if(i && (focus == MAIN)){
-							mfreq(get_vfot(), LEAD0);					// update main display
-						}
-						if(i && (focus == SUB)){
-							sfreq(get_vfot(), LEAD0);					// update sub display
-						}
-						vfo_change(focus);
-					}
+					freq_update(focus, j);
 				}
 			}
 		}
@@ -1624,6 +1661,51 @@ U32 process_DIAL(U8 focus){
 	}
 	return rflags;
 }	// end process_DIAL()
+
+//-----------------------------------------------------------------------------
+// freq_update() handles frequency updates
+//-----------------------------------------------------------------------------
+void freq_update(U8 focus, S8 step){
+	U8	i;			// temp
+	U8	m;
+
+	// main freq update
+	if((maddr == MHZ_OFF) || (maddr == MHZ_ONE)){
+		// MHZ (No thumbwheel) mode:
+		i = add_vfo(focus, step, maddr);					// update vfo
+		if(i && (focus == MAIN)){
+			mfreq(get_freq(MAIN), 0);					// update display
+		}
+		if(i && (focus == SUB)){
+			sfreq(get_freq(SUB), 0);
+		}
+		vfo_change(focus);
+	}else{
+		// digit-by-digit (thumbwheel) mode
+		m = maddr & (~MHZ_OFFS);						// mask offset mode flag
+		if(m == 0) step = (step & 0x01) * 5;					// pick the odd 5KHz
+		i = add_vfo(focus, step, maddr);					// update vfo
+		if(mhz_time(0)){
+			mhz_time(1);								// reset timer
+			if(maddr & MHZ_OFFS){
+				offs_time(1);
+				mhz_time(1);
+			}
+		}
+		else{
+			mhz_time(0xff);								// exit MHz mode
+			offs_time(0xff);
+		}
+		if(i && (focus == MAIN)){
+			mfreq(get_vfot(), LEAD0);					// update main display
+		}
+		if(i && (focus == SUB)){
+			sfreq(get_vfot(), LEAD0);					// update sub display
+		}
+		vfo_change(focus);
+	}
+	return;
+}
 
 //-----------------------------------------------------------------------------
 // digfreq() sets the frequency by digit addr.
