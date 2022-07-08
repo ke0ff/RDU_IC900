@@ -22,6 +22,13 @@
 #define	BOOT_RESP_EPERR	5
 #define	BOOT_RESP_RAERR	6
 
+#define	HM_BUFF_END		20			// HM-1xx MFmic buffer length
+// MFmic HM-key state machine defines
+#define	HMST_INIT		1			// initial state
+#define	HMST_PRESS		2			// pressed state: "h" or "r/R" to exit
+#define	HMST_HOLD		3			// hold state: "r/R" to exit
+#define	HMST_REL		4			// release debounce
+
 //=============================================================================
 // public command fn declarations
 
@@ -37,3 +44,6 @@ U8 gas_gage(U16 len);
 void string_addr_init(void);
 U8 asc_hex(S8 c);
 float temp_float(U16 k);
+U8 got_hm_asc(void);
+U8 hm_asc(void);
+void cmd_fn_init(void);

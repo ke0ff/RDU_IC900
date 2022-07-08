@@ -52,6 +52,10 @@ char device_valid;
 #define MAX_PRESP_BUF 80
 char bcmd_resp_buf[MAX_PRESP_BUF + 10];
 char* bcmd_resp_ptr;
+// HM-133 MFmic support
+U8	hm_buf[HM_BUFF_END];				// signal buffer
+U8	hm_hptr;
+U8	hm_tptr;
 
 // enum error message ID
 enum err_enum{ no_response, no_device, target_timeout };
@@ -59,12 +63,12 @@ enum err_enum{ no_response, no_device, target_timeout };
 // enum list of command numerics
 //	each enum corresponds to a command from the above list (lastcmd corresponds
 //	with the last entry, 0xff)
-//                                                            1     1     1   1   1  1   1     1    1   2  2  2  2  2
-//                        0   1  2  3   4   5  6  7  8  9  0  1     2     3   4   5  6   7     8    9   0  1  2  3  4
-const char cmd_list[] = {"BT\0B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0STO\0TI\0T\0?\0H\0VERS\0\xff"};
-//             0      1      2       3       4       5       6      7       8       9       10      11       12   13   14   15   16    17       18       19
-enum cmd_enum{ bttest,beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,sto_mem,
-//             20        21      22    23    24
+//                                                            1     1     1   1   1  1   1     1    1   2  2  2  2  2  2
+//                        0  1   2  3  4  5   6   7  8  9  0  1     2     3   4   5  6   7     8    9   0  1  2  3  4  5
+const char cmd_list[] = {"~\0BT\0B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0STO\0TI\0T\0?\0H\0VERS\0\xff"};
+//             0      1      2      3       4       5       6       7       8      9       10      11      12       13   14   15   16   17    18       19,      20
+enum cmd_enum{ hm_cmd,bttest,beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,sto_mem,
+//             21        22      23    24    25
 			   timer_tst,trig_la,help1,help2,vers,lastcmd,helpcmd };
 
 #define	cmd_type	char	// define as char for list < 255, else define as int
@@ -156,6 +160,8 @@ char* char_srch(char* sptr, char searchr);
 U8 str_chks(char* sptr);
 U32 dpl_calc(U16 dplcode);
 U8 cadd(U16 dplcode, U8 index);
+void hm_cmd_exec(char* sptr, U8 cmd);
+void hm_map(U8 cm, U8 hm);
 
 //=============================================================================
 // CLI cmd processor entry point
@@ -216,10 +222,12 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 
 	bchar = '\0';																// clear global escape
     if (nargs > 0){
-		for(i = 0; i <= nargs; i++){											//upcase all args
-			s = args[i];
-			str_toupper(s);
-		}
+    	if((args[0][0] != '~')){
+    		for(i = 0; i <= nargs; i++){											//upcase all args
+    			s = args[i];
+    			str_toupper(s);
+    		}
+    	}
 		t = args[0];															// point to first arg (cmd)
 		cmd_id = cmd_srch(t);													// search for command
 		s = args[1];															// point to 2nd arg (1st param)
@@ -355,7 +363,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 																				// 1234567890123456789012345678901234567890123456789012345678901234567890
 																				//          1         2         3         4         5         6         7
 				case sto_mem:													// store mem: p[0] = band, p[1] = mem#, p[2] = chks, a[4] = mem_param_string
-					params[0] = 0;								// band#		// STO <nnum> <mchr> <chks> "str"
+					params[0] = 0;								// band#		// STO <bnum> <mchr> <chks> "str"
 					params[2] = 0;								// checks		//
 					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
 					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
@@ -452,6 +460,13 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
 					doscan((U8)params[0], (U8)params[1]);
 					putsQ("doscan");
+					break;
+
+				case hm_cmd:													// process HM-133 MFmic data stream intercepts
+					putsQ("\n{hmc:");
+					putsQ(args[0]);		// debug !!!
+					putsQ("}\n");		// debug
+					hm_cmd_exec(args[0], 0);
 					break;
 
 				case hm_data:													// debug, send SO] data (2 concat 16b params)
@@ -1291,7 +1306,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 //=============================================================================
 void do_help(void){
 
-	putsQ("ke0ff KPU Debug CMD List:");
+	putsQ("IC-900 RDU-Clone CMD List:");
 	putsQ("Syntax: <cmd> <arg1> <arg2> ... args are optional depending on cmd.");
 	putsQ("\t<arg> order is critical except for floaters.");
 	putsQ("\"?\" as first <arg> gives cmd help,  \"? ?\" lists all cmd help lines. When");
@@ -1916,3 +1931,337 @@ U8 str_chks(char* sptr){
 	}
 	return i;
 }
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// cmd_fn_init() initializes local statics (IPL)
+//-----------------------------------------------------------------------------
+
+void cmd_fn_init(void){
+
+	hm_hptr = 0;
+	hm_tptr = 0;
+	hm_cmd_exec((char*) 0, 0xff);
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// hm_cmd_exec() executes the hm command intercept and fills the hm_buf[]
+//	This gets called once for each MFmic key packet received
+//-----------------------------------------------------------------------------
+void hm_cmd_exec(char* sptr, U8 cmd){
+		U8	cm = '\0';
+		U8	hm;
+		U8	j;
+static	U8	hm_state;
+
+	if(cmd == 0xff){
+		hm_map(0xff, 0xff);							// IPL init..
+		hm_state = HMST_INIT;
+		return;
+	}
+	// validate command packet
+	j = (*(sptr+1) ^ *(sptr+2)) | 0x80;
+	if((j == *(sptr+3)) && (*(sptr+4) == '\0')){
+		cm = *(sptr+1);
+		hm = *(sptr+2);
+		switch(hm_state){
+		default:
+		case HMST_INIT:
+			if((hm == 'p') || (hm == 'h')){
+				hm_map(cm, 'p');					// map keypress into signal buffer
+				hm_state = HMST_PRESS;				// point to next state
+				hmk_time(1);						// start hold timer
+			}
+			break;
+
+		case HMST_PRESS:
+			if((hm == 'h') && !hmk_time(0)){
+				hm_map(cm, hm);						// map hold keypress into signal buffer
+				hm_state = HMST_HOLD;				// point to next state
+				hmk_time(1);						// reset hold timer
+			}else{
+				if((hm == 'r')){
+					hm_map(cm, hm);					// map hold keypress into signal buffer
+					hm_state = HMST_INIT;			// point to next state
+					hmk_time(0xff);					// clear hold timer
+				}
+			}
+			break;
+
+		case HMST_HOLD:
+			if(hm == 'h'){
+				hmk_time(1);						// reset hold timer
+			}
+			if((!hmk_time(0)) || (hm == 'r') || (hm == 'R')){
+				hm_map(cm, 'r');					// map release keypress into signal buffer
+				hm_state = HMST_INIT;				// point to next state
+				hmk_time(0xff);						// clear timer
+			}else{
+				putsQ("^");
+			}
+			break;
+		}
+	}
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// hm_map() maps the MFmic hm command intercept to a local key ID and fills the hm_buf[]
+//-----------------------------------------------------------------------------
+//char keychr_lut[] = {  TSchr, };
+void hm_map(U8 cm, U8 hm){
+		U8	j;
+static	U8	shftm;
+
+	// trap IPL init
+	if(cm == 0xff){
+		shftm = '\0';
+		// init process indicator
+		asow(0);
+		return;
+	}
+	// trap null inputs
+	if((cm == '\0') || (hm == '\0')){
+		return;
+	}
+	// map keys with shift mode active
+	if(shftm == 1){
+		switch(cm){
+			default:
+				shftm = 0;
+				j = '\0';
+				// clear process indicator
+				asow(0);
+				break;
+
+			case F2KEY:
+			case LOKEY:
+			case 'p':								// "p" == shift-toggle key
+				j = '\0';
+				if(hm == 'p'){
+					shftm ^= 1;
+					// update process indicator
+					if(shftm == 1){
+						asow(1);
+					}else{
+						asow(0);
+					}
+				}
+				break;
+
+			case 'q':
+			case '\\':
+			case '/':
+				break;
+
+			case CALLKEY:
+				j = SETchr;
+				break;
+
+			case XFCKEY:
+				j = SUBchr;
+				break;
+
+			case VMKEY:
+				j = MWchr;
+				break;
+
+			case '3':
+				j = Qupchr;
+				break;
+
+			case '6':
+				j = Qdnchr;
+				break;
+
+			case 'A':
+				j = Vupchr;
+				break;
+
+			case 'B':
+				j = Vdnchr;
+				break;
+
+// future
+/*			case 'D':
+				j = MODEchr;
+				break;*/
+// future
+/*			case '2':
+				j = DIALuchr;			// dial up/dn
+				break;
+
+			case '5':
+				j = DIALdchr;
+				break;*/
+
+			case '1':
+				if(hm == 'p'){
+					// bright
+					j = backl_adj(0xff) + 1;
+					if(j > BRT_MAX) j = BRT_MAX;
+					backl_adj(j);
+				}
+				j = '\0';
+				break;
+
+			case '4':
+				if(hm == 'p'){
+					// dim
+					j = backl_adj(0xff) - 1;
+					if(j > BRT_MAX) j = 0;
+					backl_adj(j);
+				}
+				j = '\0';
+				break;
+
+			case '8':
+				j = DUPchr;
+				break;
+
+			case '*':
+				j = TSchr;
+				break;
+
+			case '0':
+				j = Tchr;
+				break;
+		}
+	// map keys in normal mode
+	}else{
+		switch(cm){
+			default:
+			case '\\':
+			case '/':
+				j = '\0';
+				break;
+
+			case VMKEY:
+				j = MRchr;
+				break;
+
+			case XFCKEY:
+				j = MSchr;
+				break;
+
+			case CALLKEY:
+				j = CALLchr;
+				break;
+
+			case MWKEY:
+				j = HILOchr;
+				break;
+
+			case F1KEY:
+				j = SUBchr;
+				break;
+
+			case 'D':
+				j = SMUTEchr;
+				break;
+
+			case 'C':
+				j = VFOchr;
+				break;
+
+			case 'B':
+				j = TONEchr;
+				break;
+
+			case 'A':
+				j = CHKchr;
+				break;
+
+			case F2KEY:
+			case 'p':
+				j = '\0';
+				if(hm == 'p'){
+					shftm ^= 1;
+					// update process indicator
+					if(shftm == 1){
+						asow(1);
+					}else{
+						asow(0);
+					}
+				}
+				break;
+
+			case LOKEY:
+				j = MHZchr;
+				break;
+		}
+	}
+	// j == mapped key
+	if(j){
+		switch(hm){
+		// invalid edge cmd
+//		default:
+//			j = '\0';
+//			break;
+
+		// process initial press
+		case 'p':
+			break;
+
+		// process hold
+		case 'h':
+			j |= KHOLD_FLAG;
+			break;
+
+		default:
+		case 'r':
+		case 'R':
+			j |= KREL_FLAG;
+//			hmk_time(0xff);
+			break;
+		}
+		// store to buffer
+		hm_buf[hm_hptr++] = j;
+		// Process rollover
+		if(hm_hptr == HM_BUFF_END){
+			hm_hptr = 0;
+		}
+		// Process overflow -- discards oldest entry
+		if(hm_hptr == hm_tptr){
+			hm_tptr += 1;
+			if(hm_tptr == HM_BUFF_END){
+				hm_tptr = 0;
+			}
+		}
+	}
+} // end key processing
+
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// got_hm_asc() returns true if there is a MFmic cmd waiting
+//-----------------------------------------------------------------------------
+U8 got_hm_asc(void){
+	U8	rtn = '\0';
+
+	if(hm_hptr != hm_tptr){
+		rtn = 0xff;										// there is data
+	}
+	return rtn;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// hm_asc() fetches code characters from the MFmic input stream
+//-----------------------------------------------------------------------------
+U8 hm_asc(void){
+	U8	rtn = '\0';
+
+	if(hm_hptr != hm_tptr){
+		rtn = hm_buf[hm_tptr++];						// get keypad code
+		if(hm_tptr == HM_BUFF_END){						// update buf ptr w/ roll-over
+			hm_tptr = 0;
+		}
+	}
+	return rtn;
+}
+
+// eof

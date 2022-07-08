@@ -77,7 +77,7 @@
 #define	SOUT_PACE_TIME	9			// 33/4800 s for one SOUT msg
 #define	SIN_PACE_TIME	50			// wait a little over 2 word times (2 x 32/4800 s for one SIN word)
 
-#define	CLI_BUFLEN	80						// CLI buffer length
+#define	CLI_BUFLEN	100						// CLI buffer length
 #define	RE_BUFLEN	40						// buffer mem lengths
 
 // ssi bit rate defns
@@ -265,7 +265,8 @@ extern S8	xoffsent;			// xoff sent
 #define	KEY_PR_FL		0x01			// key-pressed bit field
 #define	KEY_HOLD_FL		0x02			// key-hold bit field
 #define	KEY_PRESCALE	10				// sets COL hold time (in ms +1)
-#define KEY_HOLD_TIME	(SEC1/KEY_PRESCALE) // keypad hold timer value (~~ 1 sec)
+#define HM_KEY_HOLD_TIME (SEC1) // keypad hold timer value (~~ 1 sec)
+#define KEY_HOLD_TIME	(HM_KEY_HOLD_TIME/KEY_PRESCALE) // keypad hold timer value (~~ 1 sec)
 #define	KEY_HOLD_KEY	0x8000			// set hi bit of key buffer entry to signal hold
 #define	KEY_RELEASE_KEY	0x4000			// key release keycode
 #define	KHOLD_FLAG		0x80			// flag bit for key hold character
@@ -293,6 +294,18 @@ extern S8	xoffsent;			// xoff sent
 #define	Qupchr			50
 #define	Qdnchr			51
 #define	SMUTEchr		52
+
+// HM MFmic character defines
+#define	LOKEY		'L'
+#define	CALLKEY		'T'
+#define	XFCKEY		'X'
+#define	UPKEY		'/'
+#define	VMKEY		'V'
+#define	MWKEY		'M'
+#define	DNKEY		'\\'
+#define	F1KEY		'F'
+#define	F2KEY		'G'
+
 // key hold chr codes
 #define	SUBchr_H		(33 | KHOLD_FLAG)
 #define	TONEchr_H		(34 | KHOLD_FLAG)
@@ -389,6 +402,7 @@ U8 v_time(U8 tf);
 U8 q_time(U8 tf);
 U8 set_time(U8 tf);
 U8 offs_time(U8 tf);
+U8 hmk_time(U8 tf);
 U8 sub_time(U8 tf);
 U8 mic_time(U8 tf);
 U8 micdb_time(U8 tf);

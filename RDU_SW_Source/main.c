@@ -17,8 +17,7 @@
  *    				 !!! Need to come up with a re-start sequence without power cycling if the BERR is resolved.
  *    				 !!! mem scan needs to disable string disp mode...
  *
- *    				 * test band switching (VFO button)
- *    				 * SET loop:
+ *    				 * SET loop: !!! performed with MFmic support -- no SET loop yet
  *    				 	- DIM brightness setting, LCD and button
  *    				 	- BRT brightness setting, LCD and button
  *    				 * VFO Scan mode
@@ -26,6 +25,16 @@
  *
  *
  *    Project scope rev History:
+ *    07-05-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c/h lcd.c/h
+ *    				    Added support for HM-133wr MultiFunction-MIC support.  cmd_fn() intercepts mic data stream and sends signals to keypad code.  This allows
+ *    						the system to use the wired remote to input command keys from the HM-1xx mics.
+ *    					Added code to support F2-shifts for HM-151 and capture FUNC shifts from HM-133.  Function switches implemented for backlight/led brt/dim,
+ *    						SQU+/-, VOL+/-, DUP, TS, SUB, MW.
+ *    						MODE, Dial+/-, Tsqu, and SET are stubbed, but there are not yet any functions tied to these buttons.
+ *    						BRT/DIM are overridden by changes to the slide switch.
+ *    						All currently implemented front-panel buttons are supported using the HM-151 or HM-133 MFmics.
+ *    					Increased CMDLN serial input buffer to 100 bytes (was 80).
+ *
  *    04-10-22 jmh:  Explored fixes to OFFS edit function while in MEM mode. Simplified key pre-processing (test_for_cancel) to remove deep if-else constructs and
  *    					greatly improve editability of the construct. Prioritized DUP key above MHz key to address conflict in test_for_cancel logic. Also changed
  *    					process_DIAL() to accommodate OFFS change while in mem mode.
@@ -339,6 +348,7 @@ U16		tstimer;						// TS adj mode timer
 U16		slidetimer;						// txt slide rate timer
 U16		scanmtimer;						// main scan timer
 U16		scanstimer;						// sub scan timer
+U16		hmktimer;						// sub scan timer
 
 U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
@@ -437,6 +447,7 @@ int main(void){
     ipl = proc_init();									// initialize the processor I/O
     main_dial = 0;
     init_spi3();
+    cmd_fn_init();										// init cmd_fn statics
     do{													// outer-loop (do forever, allows soft-restart)
         rebufN[0] = rebuf0;								// init CLI re-buf pointers
     	rebufN[1] = rebuf1;
@@ -1147,6 +1158,8 @@ char get_key(void){
 			kbd_tptr = 0;
 		}
 		rtn = kp_asc(j);								// get ASCII
+	}else{
+		rtn = hm_asc();									// get ASCII from MFmic data stream
 	}
 	return rtn;
 }
@@ -1421,6 +1434,27 @@ U8 mute_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
+// hmk_time() sets/reads the hmk hold timer
+//	(tf == 0 reads, 1 sets, 0xff clears, 0xfe sets long)
+//-----------------------------------------------------------------------------
+U8 hmk_time(U8 tf){
+
+	if(tf == 0xff){
+		hmktimer = 0;
+		return FALSE;
+	}
+	if(tf == 0xfe){
+		hmktimer = 0xffff;
+	}else{
+		if(tf == 1){
+			hmktimer = HM_KEY_HOLD_TIME;
+		}
+	}
+	if(hmktimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 // slide_time() sets/reads the text slide rate timer
 //	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
@@ -1671,6 +1705,7 @@ static	U16	key_last;				// last key
 		// kbup_flag == true if key is released (app needs to clear)
 		// Row address to switch matrix is only advanced when there is no keypress (so, this alg. doesn't do
 		// key rollover).
+		// Each keypress produces 2 or 3 entries into the kbd_buff[]: 1 at initial press, 1 at the hold duration, and one at release
 
 		if(--kpscl == 0){
 			kpscl = KEY_PRESCALE;
@@ -1823,6 +1858,9 @@ static	U16	key_last;				// last key
 		}
 		if (scanstimer != 0){								// update sub scan timer
 			scanstimer--;
+		}
+		if (hmktimer != 0){								// update sub scan timer
+			hmktimer--;
 		}
 		if(num_beeps){
 			if (beepgaptimer != 0){							// update beep gap timer

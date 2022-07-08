@@ -13,14 +13,15 @@
 
 /********************************************************************
  *  File scope declarations revision history:
- *    07-30-14 jmh:  0.0 creation date
+ *    07-06-22 jmh:  0.12 MFmic support release
  *    04-09-16 jmh:  0.1 First field release
+ *    07-30-14 jmh:  0.0 creation date
  *
  *******************************************************************/
 
 #ifdef VERSOURCE
-const S8    version_number[] = {"0.11"};
-const S8    date_code[]      = {"10-Apr-2022"};
+const S8    version_number[] = {"0.12"};
+const S8    date_code[]      = {"06-Jul-2022"};
 #endif
 
 //-----------------------------------------------------------------------------

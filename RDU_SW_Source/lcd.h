@@ -207,6 +207,10 @@
 #define	ABND		0x4
 #define	ABND_ADDR	0x1f
 
+#define	BRT_MAX		9
+#define	BRT_DIM		2
+#define	BRT_BRT		9
+
 //-----------------------------------------------------------------------------
 // Global Fns
 //-----------------------------------------------------------------------------
@@ -232,6 +236,7 @@ void sdupa(char dplx);
 void mdupa_blink(U8 tf);
 void sdupa_blink(U8 tf);
 void alow(U8 tf);
+void asow(U8 tf);
 void amhz(U8 tf);
 void abnd(U8 tf);
 void asub(U8 tf);
@@ -261,3 +266,4 @@ void set_slide(U8 focus, U8 tf);
 U8 mem2ordinal(char cm);
 char ordinal2mem(U8 memnum);
 U8 lookup_pl(U16 ctcss);
+U8 backl_adj(U8 setv);

@@ -280,12 +280,14 @@ void process_UI(U8 cmd){
 			if(i ^ sw_stat){												// if changes..
 				if(i & DIM){
 					// process bright settings (!!! these need to be configurable in SET loop)
-					set_pwm(5, 99);											// LEDs
-			        set_pwm(6, 90);											// LCDBL
+					backl_adj(BRT_BRT);
+/*					set_pwm(5, 99);											// LEDs
+			        set_pwm(6, 90);											// LCDBL*/
 				}else{
 					// process DIM settings (!!! these need to be configurable in SET loop)
-					set_pwm(5, 60);
-			        set_pwm(6, 30);
+					backl_adj(BRT_DIM);
+/*					set_pwm(5, 60);
+			        set_pwm(6, 30);*/
 				}
 				if(i & MISO_LOCK){
 					alock(1);												// process lock mode
@@ -554,7 +556,7 @@ U8 process_MS(U8 mode){
 		//**************************************
 		// process keys
 		b = 0;
-		if(got_key()){													// only run through this branch if there are keys to input
+		if(got_key() || got_hm_asc()){									// only run through this branch if there are keys to input
 			if(band_focus == SUB){
 				sub_time(1);											// reset timeout
 			}
@@ -2475,6 +2477,22 @@ void alow(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
+// asow() sets/clears OW annunc.  Input is TF
+//-----------------------------------------------------------------------------
+void asow(U8 tf){
+
+	lcd_buf[0] = CS1_MASK | 0x02;
+	lcd_buf[1] = LOAD_PTR | AOW_ADDR;
+	if(tf){
+		lcd_buf[2] = OR_DMEM | AOW;
+	}else{
+		lcd_buf[2] = AND_DMEM | ALOW;
+	}
+	put_spi(lcd_buf, CS_OPENCLOSE);
+	return;
+}
+
+//-----------------------------------------------------------------------------
 // alock() sets/clears LOCK annunc.  Input is TF
 //-----------------------------------------------------------------------------
 void alock(U8 tf){
@@ -3262,3 +3280,30 @@ U8 get_last_cos(U8 focus){
 	}
 	return i;
 }
+
+//-----------------------------------------------------------------------------
+// backl_adj() adjusts the backlight to one of 10 settings
+//	if setting is invalid, do nothing.
+//	returns current setting
+//-----------------------------------------------------------------------------
+
+//					 dim             ...                 brt
+U8	brt_table1[] = { 10, 20, 30, 40, 50, 60, 70, 80, 90, 99 };
+U8	brt_table2[] = { 5, 15, 25, 38, 45, 50, 60, 70, 80, 90 };
+
+U8 backl_adj(U8 setv){
+	static	U8	setmem;
+
+	if(setmem > BRT_MAX){
+		setmem = BRT_DIM;
+	}
+	if(setv <= BRT_MAX){
+		setmem = setv;
+		// process bright settings
+		set_pwm(5, brt_table1[setmem]);						// LEDs
+		set_pwm(6, brt_table2[setmem]);						// LCDBL
+	}
+    return setmem;
+}
+
+// eof
