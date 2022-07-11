@@ -409,7 +409,7 @@ void  process_SIN(U8 cmd){
 	char	dbuf[35];	// !!! debug buff
 	static U32 lerr;
 
-	if(cmd == 0xff){									// initial program load (reset) branch
+	if(cmd == PROC_INIT){								// initial program load (reset) branch
 		sin_time(SIN_ACTIVITY);							// start SIN activity timer
 		sin_addr0 = 0;									// pre-clear data and activity flags
 		sin_addr1 = 0;
@@ -417,50 +417,51 @@ void  process_SIN(U8 cmd){
 		lerr = 10L;
 		init_radio();									// init radio and data structures
 		ptt_mem = 0x10L;
-	}else{												// normal (run) branch
-		if(got_sin()){
-			sin_data = get_sin();						// get'n check for SIN data
-			if((sin_data & SIN_STOP) == SIN_STOP){		// validate extended "stop" bits
-				clr_sys_err(NO_B_PRSNT);				// clear LOS error
-				sin_flags &= ~SIN_SINACTO_F;			// clear timeout error
-				if(sin_data & SIN_ADDR){				// process addr == 1 data
-					// ADDR 1
-					if(sin_data != sin_addr1){			// if data is new (different == new)
-						// process new addr1 data ... calculate change flags
-						ii = ((sin_data ^ sin_addr1) & SIN1_DATA) & 0xffff0000L;
-						sin_flags |= ii;
-						sin_addr1 = sin_data;			// store new data
-					}
-				}else{
-					// process ADDR == 0 data
-					if(sin_data != sin_addr0){			// if data is new (different == new)
-						// process new addr0 data ... calculate change flags
-						ii = (((sin_data ^ sin_addr0) & SIN0_DATA) >> 16) & 0x0000ffffL;
-						sin_flags |= ii;
-						sin_addr0 = sin_data;
-					}
+		return;
+	}													// normal (run) branch
+	if(got_sin()){
+		sin_data = get_sin();							// get'n check for SIN data
+		if((sin_data & SIN_STOP) == SIN_STOP){			// validate extended "stop" bits
+			clr_sys_err(NO_B_PRSNT);					// clear LOS error
+			sin_flags &= ~SIN_SINACTO_F;				// clear timeout error
+			if(sin_data & SIN_ADDR){					// process addr == 1 data
+				// ADDR 1
+				if(sin_data != sin_addr1){				// if data is new (different == new)
+					// process new addr1 data ... calculate change flags
+					ii = ((sin_data ^ sin_addr1) & SIN1_DATA) & 0xffff0000L;
+					sin_flags |= ii;
+					sin_addr1 = sin_data;				// store new data
 				}
 			}else{
-				// no (valid) data
-				sprintf(dbuf,"0err = %d, data = 0x%08x, free = %d", get_error(), sin_data, get_free());
-				putsQ(dbuf);
+				// process ADDR == 0 data
+				if(sin_data != sin_addr0){				// if data is new (different == new)
+					// process new addr0 data ... calculate change flags
+					ii = (((sin_data ^ sin_addr0) & SIN0_DATA) >> 16) & 0x0000ffffL;
+					sin_flags |= ii;
+					sin_addr0 = sin_data;
+				}
 			}
-		}
-		if((!sin_time(0)) && !(sin_flags & SIN_SINACTO_F)){
-			sin_flags |= SIN_SINACTO_F;					// set timeout error if activity timer expires
-														// !!! need to trap this condition and post an error message to LCD
-			set_sys_err(NO_B_PRSNT);
-			flush_sin();								// "It's Saturday night, FLUSH ME K!"
-														// flush and reset the SIN input system
-		}
-		tt = get_error();
-		if(tt != lerr){
-			lerr = tt;
-			sprintf(dbuf,"ORerr = %d, free = %d", tt, get_free());
+		}else{
+			// no (valid) data
+			sprintf(dbuf,"0err = %d, data = 0x%08x, free = %d", get_error(), sin_data, get_free());
 			putsQ(dbuf);
 		}
-//		print_ptr(); //!!!
 	}
+	if((!sin_time(0)) && !(sin_flags & SIN_SINACTO_F)){
+		sin_flags |= SIN_SINACTO_F;						// set timeout error if activity timer expires
+														// !!! need to trap this condition and post an error message to LCD
+		set_sys_err(NO_B_PRSNT);
+		flush_sin();									// "It's Saturday night, FLUSH ME K!"
+														// flush and reset the SIN input system
+	}
+	tt = get_error();
+	if(tt != lerr){
+		lerr = tt;
+		sprintf(dbuf,"ORerr = %d, free = %d", tt, get_free());
+		putsQ(dbuf);
+	}
+//	print_ptr(); //!!!
+	return;
 }
 
 //-----------------------------------------------------------------------------
@@ -485,7 +486,8 @@ U8 process_SOUT(U8 cmd){
 			U32* pptr;			// pointer into SOUT buffer
 //			char dgbuf[30];		// !!! debug sprintf/putsQ buffer
 
-	if(cmd == 0xff){								// initial program load (reset) branch
+	// IPL (reset) init of local statics
+	if(cmd == PROC_INIT){
 		pll_ptr = 0xff;								// set index to "idle" state
 		sout_time(0);								// initialize timer and statics
 		xit_count = 0;
@@ -494,186 +496,188 @@ U8 process_SOUT(U8 cmd){
 		last_msqu = 0xff;
 		last_svol = 0xff;
 		last_ssqu = 0xff;
+		mute_time(0xff);
 //		sout_flags = 0;
-	}else{											// normal (run) branch
-		if(pll_ptr == 0xff){
-			// no data is being sent branch ...
-			j = 0;
-			if(bandoff_m){																// turn-off band module flag trap, main
-				pll_buf[j++] = bandoff_m << 27;
-				pll_ptr = 0;
-				bandoff_m = 0;															// clear signal flag
-				pll_buf[j] = 0xffffffffL;
-				k = 0xff;																// processing...
-			}
-			if(bandoff_s){																// turn-off band module flag trap, main
-				pll_buf[j++] = bandoff_s << 27;
-				pll_ptr = 0;
-				bandoff_s = 0;															// clear signal flag
-				pll_buf[j] = 0xffffffffL;
-				k = 0xff;																// processing...
-			}
-			if(!j){
-				ii = sin_addr1 & SIN_SEND;
-				if(ii != ptt_mem) {														// PTT change detected
-					ptt_mem = ii;														// save change
-					if(ii){
-						i = 1;															// PTT is TX
-						if(get_xmodeq() & MSCANM_XFLAG){
-							doscan(MAIN, 0);											// shut down scan
-							do_1beep();
-						}
+		return 0;
+	}
+	// if not IPL, run normal process...
+	if(pll_ptr == 0xff){
+		// no data is being sent branch ...
+		j = 0;
+		if(bandoff_m){																// turn-off band module flag trap, main
+			pll_buf[j++] = bandoff_m << 27;
+			pll_ptr = 0;
+			bandoff_m = 0;															// clear signal flag
+			pll_buf[j] = 0xffffffffL;
+			k = 0xff;																// processing...
+		}
+		if(bandoff_s){																// turn-off band module flag trap, main
+			pll_buf[j++] = bandoff_s << 27;
+			pll_ptr = 0;
+			bandoff_s = 0;															// clear signal flag
+			pll_buf[j] = 0xffffffffL;
+			k = 0xff;																// processing...
+		}
+		if(!j){
+			ii = sin_addr1 & SIN_SEND;
+			if(ii != ptt_mem) {														// PTT change detected
+				ptt_mem = ii;														// save change
+				if(ii){
+					i = 1;															// PTT is TX
+					if(get_xmodeq() & MSCANM_XFLAG){
+						doscan(MAIN, 0);											// shut down scan
+						do_1beep();
 					}
-					else{
-						i = 0;															// PTT is RX
-					}
-					set_ptt(i);															// transfer to lcd.c
-					amtx(i^1);															// update TX LED
-					setpll(bandid_m, pll_buf, i, MAIN);									// PTT only drives MAIN band, set the module for TX
-					set_vfo_display(VMODE_ISTX | MAIN);
-					pll_ptr = 0;														// enable data send
+				}
+				else{
+					i = 0;															// PTT is RX
+				}
+				set_ptt(i);															// transfer to lcd.c
+				amtx(i^1);															// update TX LED
+				setpll(bandid_m, pll_buf, i, MAIN);									// PTT only drives MAIN band, set the module for TX
+				set_vfo_display(VMODE_ISTX | MAIN);
+				pll_ptr = 0;														// enable data send
 //					sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
 //					putsQ(dgbuf);
-					sin_flags &= ~SIN_SEND_F;											// clear the signal
-					k = 0xff;															// processing...
-				}else{
-					// process sout signals
-					if(sout_flags){														// if not zero, there are (bit-mapped) signals to process
-						pptr = pll_buf;													// preset sout buffer pointer
-						// get an ordinal value for the highest priority signal
-						if(mute_time(0)){
-							i = get_bit(sout_flags & ~(SOUT_MVOL_F|SOUT_SVOL_F));		// if mute delay, mask off vol flags
+				sin_flags &= ~SIN_SEND_F;											// clear the signal
+				k = 0xff;															// processing...
+			}else{
+				// process sout signals
+				if(sout_flags){														// if not zero, there are (bit-mapped) signals to process
+					pptr = pll_buf;													// preset sout buffer pointer
+					// get an ordinal value for the highest priority signal
+					if(mute_time(0)){
+						i = get_bit(sout_flags & ~(SOUT_MVOL_F|SOUT_SVOL_F));		// if mute delay, mask off vol flags
+					}else{
+						i = get_bit(sout_flags);
+					}
+					switch(i){														// this will mechanize the various updates to process in order without collision
+					case SOUT_VFOM_N:
+						if(sin_addr1 & SIN_SEND) i = 1;								// get current state of PTT
+						else i = 0;
+						pptr = setpll(bandid_m, pll_buf, i, MAIN);					// update main pll
+						pll_ptr = 0;
+						sout_flags &= ~SOUT_VFOM_F;									// clear the signal
+						set_vfo_display(MAIN);										// send disp update signal
+						save_vfo(bandid_m);											// save affected VFO
+						break;
+
+					case SOUT_VFOS_N:
+						setpll(bandid_s, pptr, 0, SUB);								// update main pll
+						pll_ptr = 0;
+						sout_flags &= ~SOUT_VFOS_F;
+						set_vfo_display(SUB_D);										// send disp update signal
+						save_vfo(bandid_s);											// save affected VFO
+						break;
+
+					case SOUT_MVOL_N:												// process VOL/SQU triggers...
+						if((mute_band & MS_MUTE) || (bandid_m > ID1200_IDX)){
+							i = 0;													// 0 if muted
 						}else{
-							i = get_bit(sout_flags);
+							i = vol_m;
 						}
-						switch(i){														// this will mechanize the various updates to process in order without collision
-						case SOUT_VFOM_N:
-							if(sin_addr1 & SIN_SEND) i = 1;								// get current state of PTT
-							else i = 0;
-							pptr = setpll(bandid_m, pll_buf, i, MAIN);					// update main pll
+						if(i != last_mvol){
+							last_mvol = i;
+							pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
 							pll_ptr = 0;
-							sout_flags &= ~SOUT_VFOM_F;									// clear the signal
-							set_vfo_display(MAIN);										// send disp update signal
-							save_vfo(bandid_m);											// save affected VFO
-							break;
+							pll_buf[1] = 0xfffffffeL;								// set to confirm mute
+						}
+						sout_flags &= ~SOUT_MVOL_F;									// clear signal flag
+						break;
 
-						case SOUT_VFOS_N:
-							setpll(bandid_s, pptr, 0, SUB);								// update main pll
+					case SOUT_SVOL_N:
+						if((mute_band & SUB_MUTE) || (bandid_s > ID1200_IDX)){
+							i = 0;
+						}else{
+							i = vol_s;
+						}
+						if(i != last_svol){
+							last_svol = i;
+							pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
 							pll_ptr = 0;
-							sout_flags &= ~SOUT_VFOS_F;
-							set_vfo_display(SUB_D);										// send disp update signal
-							save_vfo(bandid_s);											// save affected VFO
-							break;
+							pll_buf[1] = 0xfffffffeL;								// set to confirm mute
+						}
+						sout_flags &= ~SOUT_SVOL_F;									// clear signal flag
+						break;
 
-						case SOUT_MVOL_N:												// process VOL/SQU triggers...
-							if((mute_band & MS_MUTE) || (bandid_m > ID1200_IDX)){
-								i = 0;													// 0 if muted
-							}else{
-								i = vol_m;
-							}
-							if(i != last_mvol){
-								last_mvol = i;
-								pll_buf[0] = atten_calc(i) | ATTEN_MAIN | VOL_ADDR;
-								pll_ptr = 0;
-								pll_buf[1] = 0xfffffffeL;									// set to confirm mute
-							}
-							sout_flags &= ~SOUT_MVOL_F;									// clear signal flag
-							break;
-
-						case SOUT_SVOL_N:
-							if((mute_band & SUB_MUTE) || (bandid_s > ID1200_IDX)){
-								i = 0;
-							}else{
-								i = vol_s;
-							}
-							if(i != last_svol){
-								last_svol = i;
-								pll_buf[0] = atten_calc(i) | ATTEN_SUB | VOL_ADDR;
-								pll_ptr = 0;
-								pll_buf[1] = 0xfffffffeL;								// set to confirm mute
-							}
-							sout_flags &= ~SOUT_SVOL_F;									// clear signal flag
-							break;
-
-						case SOUT_MSQU_N:
-							i = vfo_p[bandid_m].sq;
-							if(i != last_msqu){
-								last_msqu = i;
-								pll_buf[0] = atten_calc(i) | ATTEN_MAIN | SQU_ADDR;
-								pll_ptr = 0;
-								pll_buf[1] = 0xffffffffL;
-							}
-							sout_flags &= ~SOUT_MSQU_F;									// clear signal flag
-							break;
-
-						case SOUT_SSQU_N:
-							i = vfo_p[bandid_s].sq;
-							if(i != last_ssqu){
-								last_ssqu = i;
-								pll_buf[0] = atten_calc(i) | ATTEN_SUB | SQU_ADDR;
-								pll_ptr = 0;
-								pll_buf[1] = 0xffffffffL;
-							}
-							sout_flags &= ~SOUT_SSQU_F;									// clear signal flag
-							break;
-
-						case SOUT_TONE_N:												// send tone message
-							pll_buf[0] = (U32)vfo_p[bandid_m].ctcss | TONE_ADDR;
+					case SOUT_MSQU_N:
+						i = vfo_p[bandid_m].sq;
+						if(i != last_msqu){
+							last_msqu = i;
+							pll_buf[0] = atten_calc(i) | ATTEN_MAIN | SQU_ADDR;
 							pll_ptr = 0;
 							pll_buf[1] = 0xffffffffL;
-							sout_flags &= ~SOUT_TONE_F;									// clear signal flag
-							break;
-
-						default:
-						case SOUT_VUPD_N:
-							push_vfo();													// save VFO
-							sout_flags &= ~SOUT_VUPD_F;
-							break;
 						}
-						if(pll_ptr == 0) k = 0xff;										// processing...
+						sout_flags &= ~SOUT_MSQU_F;									// clear signal flag
+						break;
+
+					case SOUT_SSQU_N:
+						i = vfo_p[bandid_s].sq;
+						if(i != last_ssqu){
+							last_ssqu = i;
+							pll_buf[0] = atten_calc(i) | ATTEN_SUB | SQU_ADDR;
+							pll_ptr = 0;
+							pll_buf[1] = 0xffffffffL;
+						}
+						sout_flags &= ~SOUT_SSQU_F;									// clear signal flag
+						break;
+
+					case SOUT_TONE_N:												// send tone message
+						pll_buf[0] = (U32)vfo_p[bandid_m].ctcss | TONE_ADDR;
+						pll_ptr = 0;
+						pll_buf[1] = 0xffffffffL;
+						sout_flags &= ~SOUT_TONE_F;									// clear signal flag
+						break;
+
+					default:
+					case SOUT_VUPD_N:
+						push_vfo();													// save VFO
+						sout_flags &= ~SOUT_VUPD_F;
+						break;
 					}
+					if(pll_ptr == 0) k = 0xff;										// processing...
 				}
 			}
-		}else{
-			// data is being sent branch ...
-			// wait for pacing timer
-			k = 0xff;																	// set "processing" flag
-			if(!sout_time(0xff)){														// check for the pacing timer to expire
-				// send buffer, 1 word/pass
-				if((pll_buf[pll_ptr] & 0xfffffff0) != 0xfffffff0){						// (almost) all "f's" is end of buffer semaphore
-					if((pll_buf[pll_ptr] & UX_XIT_MASK) != UX_XIT){						// process non-xit/rit messages
+		}
+	}else{
+		// data is being sent branch ...
+		// wait for pacing timer
+		k = 0xff;																	// set "processing" flag
+		if(!sout_time(0xff)){														// check for the pacing timer to expire
+			// send buffer, 1 word/pass
+			if((pll_buf[pll_ptr] & 0xfffffff0) != 0xfffffff0){						// (almost) all "f's" is end of buffer semaphore
+				if((pll_buf[pll_ptr] & UX_XIT_MASK) != UX_XIT){						// process non-xit/rit messages
 //						putsQ("so1");	// !!!debug
-						send_so(pll_buf[pll_ptr++]);									// send next word
-						sout_time(SOUT_PACE_TIME);
-						if(pll_ptr >= PLL_BUF_MAX){										// check for hard-end-of-buffer
-							pll_ptr = 0xff;												// set end of tx
-						}
-					}else{																// process xit/rit as a sequence of PLL message that pulse an up-dn counter on the UX-129
-																						// mechanizing this reduces the 32bit buffer length needed to queue SOUT data
-						if(xit_count){													// if we are still counting:
-							if(xit_count & 0x01){
-								putsQ("x0");	// !!!debug
-								send_so(UX_XIT_CK0);									// alternate FE clk with..
-								sout_time(SOUT_PACE_TIME);
-							}else{
-								putsQ("x1");	// !!!debug
-								if(xit_dir) send_so(UX_XIT_CKUP);						// ...REF clk up,
-								else send_so(UX_XIT_CKDN);								// or dn
-								sout_time(SOUT_PACE_TIME);
-							}
-							if(--xit_count == 0) pll_ptr++;								// X/RIT done... next pll buffer
+					send_so(pll_buf[pll_ptr++]);									// send next word
+					sout_time(SOUT_PACE_TIME);
+					if(pll_ptr >= PLL_BUF_MAX){										// check for hard-end-of-buffer
+						pll_ptr = 0xff;												// set end of tx
+					}
+				}else{																// process xit/rit as a sequence of PLL message that pulse an up-dn counter on the UX-129
+																					// mechanizing this reduces the 32bit buffer length needed to queue SOUT data
+					if(xit_count){													// if we are still counting:
+						if(xit_count & 0x01){
+							putsQ("x0");	// !!!debug
+							send_so(UX_XIT_CK0);									// alternate FE clk with..
+							sout_time(SOUT_PACE_TIME);
 						}else{
-							xit_count = (U8)(pll_buf[pll_ptr] & UX_XIT_COUNT) << 1;		// set up the count and direction
-							xit_dir = (U8)(pll_buf[pll_ptr] & UX_XIT_UP);
-							if(xit_count == 0) pll_ptr++;								// X/RIT done... next pll buffer
+							putsQ("x1");	// !!!debug
+							if(xit_dir) send_so(UX_XIT_CKUP);						// ...REF clk up,
+							else send_so(UX_XIT_CKDN);								// or dn
+							sout_time(SOUT_PACE_TIME);
 						}
+						if(--xit_count == 0) pll_ptr++;								// X/RIT done... next pll buffer
+					}else{
+						xit_count = (U8)(pll_buf[pll_ptr] & UX_XIT_COUNT) << 1;		// set up the count and direction
+						xit_dir = (U8)(pll_buf[pll_ptr] & UX_XIT_UP);
+						if(xit_count == 0) pll_ptr++;								// X/RIT done... next pll buffer
 					}
-				}else{
-					if(pll_buf[pll_ptr] == 0xfffffffe){									// look for mute confirm semaphore
-						mute_band |= 0x80;												// set muted flag
-					}
-					pll_ptr = 0xff;														// set end of tx flag
 				}
+			}else{
+				if(pll_buf[pll_ptr] == 0xfffffffe){									// look for mute confirm semaphore
+					mute_band |= 0x80;												// set muted flag
+				}
+				pll_ptr = 0xff;														// set end of tx flag
 			}
 		}
 	}

@@ -39,46 +39,76 @@
 #define XTAL 1
 //#define XTAL_FREQ	SYSCTL_RCC_XTAL_16MHZ	// set value of external XTAL
 #define XTAL_FREQ	SYSCTL_RCC_XTAL_20MHZ	// set value of external XTAL
-#define SYSCLK	(50000000L)			// sysclk freq (bus clk)
-//#define SYSCLK	(66667000L)			// sysclk freq (bus clk)
+#define SYSCLK	(50000000L)					// sysclk freq (bus clk)
+//#define SYSCLK	(66667000L)				// sysclk freq (bus clk)
 #else
 #define XTAL 0
-#define SYSCLK	PIOCLK				// sysclk freq (bus clk) same as PIOCLK
+#define SYSCLK	PIOCLK						// sysclk freq (bus clk) same as PIOCLK
 #endif
 
-#define OSC_LF 4            		// osc clock selects
+#define OSC_LF 4            				// osc clock selects
 #define OSC_HF 0
 #define OSC_EXT 1
 
-#define SEC10MS    10           	// timer constants (ms)
-#define SEC33MS    33
-#define SEC50MS    50
-#define SEC75MS    74
-#define SEC100MS  100
-#define SEC250MS  250
-#define SEC300MS  300
-#define SEC400MS  400
-#define SEC500MS  500
-#define SEC750MS  750
-#define SEC1     1000
-#define ONESEC   SEC1
-#define MS1500   1500
-#define SEC2     2000
-#define SEC3     3000
-#define SEC5     5000
-#define SEC10   10000
-#define SEC15   15000
-#define SEC30   30000
-#define SEC60   60000
-#define SEC300 300000L
-#define	ONEMIN	(SEC60)
-#define	REG_WAIT_DLY 200			// 200ms wait limit for register action
-#define RESP_SAMP SEC100MS			// sets resp rate
-#define	SOUT_PACE_TIME	9			// 33/4800 s for one SOUT msg
-#define	SIN_PACE_TIME	50			// wait a little over 2 word times (2 x 32/4800 s for one SIN word)
+// process_xx() defines
+#define	PROC_INIT	0xff					// IPL command for process calls
 
+#define	MS_PER_TIC	1
+#define SEC10MS    (10/MS_PER_TIC)          // timer constants (ms)
+#define SEC33MS    (33/MS_PER_TIC)
+#define SEC50MS    (50/MS_PER_TIC)
+#define SEC75MS    (74/MS_PER_TIC)
+#define SEC100MS  (100/MS_PER_TIC)
+#define SEC250MS  (250/MS_PER_TIC)
+#define SEC300MS  (300/MS_PER_TIC)
+#define SEC400MS  (400/MS_PER_TIC)
+#define SEC500MS  (500/MS_PER_TIC)
+#define SEC750MS  (750/MS_PER_TIC)
+#define SEC1     (1000/MS_PER_TIC)
+#define ONESEC   SEC1
+#define MS1500   (1500/MS_PER_TIC)
+#define SEC2     (2000/MS_PER_TIC)
+#define SEC3     (3000/MS_PER_TIC)
+#define SEC5     (5000/MS_PER_TIC)
+#define SEC10   (10000/MS_PER_TIC)
+#define SEC15   (15000/MS_PER_TIC)
+#define SEC30   (30000/MS_PER_TIC)
+#define SEC60   (60000/MS_PER_TIC)
+#define SEC300 (300000L/MS_PER_TIC)
+#define	ONEMIN	(SEC60)
+#define	REG_WAIT_DLY 		200				// 200ms wait limit for register action
+#define RESP_SAMP 			SEC100MS		// sets resp rate
+#define	SOUT_PACE_TIME		9				// 33/4800 s for one SOUT msg
+#define	SIN_PACE_TIME		50				// wait a little over 2 word times (2 x 32/4800 s for one SIN word)
 #define	CLI_BUFLEN	100						// CLI buffer length
 #define	RE_BUFLEN	40						// buffer mem lengths
+
+// prescaled timer constants
+#define	PS_PER_TIC	10
+#define	PRESCALE_TRIGGER (PS_PER_TIC)		// establishes 10ms/lsb prescaled timer rate
+#define PSEC10MS    (10/PS_PER_TIC)
+#define	PSEC33MS    (33/PS_PER_TIC)
+#define	PSEC50MS    (50/PS_PER_TIC)
+#define	PSEC75MS    (74/PS_PER_TIC)
+#define	PSEC100MS  (100/PS_PER_TIC)
+#define	PSEC250MS  (250/PS_PER_TIC)
+#define	PSEC300MS  (300/PS_PER_TIC)
+#define	PSEC400MS  (400/PS_PER_TIC)
+#define	PSEC500MS  (500/PS_PER_TIC)
+#define	PSEC750MS  (750/PS_PER_TIC)
+#define	PSEC1     (1000/PS_PER_TIC)
+#define	PSEC2     (2000/PS_PER_TIC)
+#define	PSEC3     (3000/PS_PER_TIC)
+#define	PSEC5     (5000/PS_PER_TIC)
+#define	PSEC10   (10000/PS_PER_TIC)
+#define	PSEC15   (15000/PS_PER_TIC)
+#define	PSEC30   (30000/PS_PER_TIC)
+#define	PSEC60   (60000/PS_PER_TIC)
+#define	PSEC300 (300000L/PS_PER_TIC)
+
+#define	CLEAR_TIMER		0xff				// timer control Fn signals
+#define	READ_TIMER		0x00
+#define	SET_TIMER		0x01
 
 // ssi bit rate defns
 // BR = SYSCLK/(CPSR * (1 + SCR))
@@ -265,8 +295,10 @@ extern S8	xoffsent;			// xoff sent
 #define	KEY_PR_FL		0x01			// key-pressed bit field
 #define	KEY_HOLD_FL		0x02			// key-hold bit field
 #define	KEY_PRESCALE	10				// sets COL hold time (in ms +1)
-#define HM_KEY_HOLD_TIME (SEC1) // keypad hold timer value (~~ 1 sec)
-#define KEY_HOLD_TIME	(HM_KEY_HOLD_TIME/KEY_PRESCALE) // keypad hold timer value (~~ 1 sec)
+#define HM_KEY_HOLD_TIME (PSEC1)		// keypad hold timer value (~~ 1 sec)
+#define SHFT_HOLD_TIME	(PSEC10) 		// MFmic func-shift timeout (~~ 10 sec)
+// keypad hold timer value (~~ 1 sec)
+#define KEY_HOLD_TIME	((HM_KEY_HOLD_TIME * PS_PER_TIC)/KEY_PRESCALE)
 #define	KEY_HOLD_KEY	0x8000			// set hi bit of key buffer entry to signal hold
 #define	KEY_RELEASE_KEY	0x4000			// key release keycode
 #define	KHOLD_FLAG		0x80			// flag bit for key hold character
@@ -305,6 +337,32 @@ extern S8	xoffsent;			// xoff sent
 #define	DNKEY		'\\'
 #define	F1KEY		'F'
 #define	F2KEY		'G'
+// shifted keys
+#define	SH_LOKEY	'p'
+#define	SH_CALLKEY	'o'
+#define	SH_XFCKEY	'n'
+#define	SH_UPKEY	'k'
+#define	SH_VMKEY	'm'
+#define	SH_MWKEY	'l'
+#define	SH_DNKEY	'j'
+#define	SH_F1KEY	'|'
+#define	SH_F2KEY	'!'
+#define	SH_1		'a'
+#define	SH_2		'b'
+#define	SH_3		'c'
+#define	SH_A		'q'
+#define	SH_4		'd'
+#define	SH_5		'e'
+#define	SH_6		'f'
+#define	SH_B		'r'
+#define	SH_7		'g'
+#define	SH_8		'h'
+#define	SH_9		'i'
+#define	SH_C		's'
+#define	SH_STR		'+'
+#define	SH_0		'`'
+#define	SH_PND		'$'
+#define	SH_D		't'
 
 // key hold chr codes
 #define	SUBchr_H		(33 | KHOLD_FLAG)
@@ -403,6 +461,7 @@ U8 q_time(U8 tf);
 U8 set_time(U8 tf);
 U8 offs_time(U8 tf);
 U8 hmk_time(U8 tf);
+U8 shft_time(U8 tf);
 U8 sub_time(U8 tf);
 U8 mic_time(U8 tf);
 U8 micdb_time(U8 tf);

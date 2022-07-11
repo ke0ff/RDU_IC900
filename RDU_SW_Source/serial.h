@@ -45,7 +45,8 @@
 #define TXD_JAMMER		0x40			// jammer code detect
 #define TXD_SND			0x80			// tx data sending
 
-#define BT_LN	0xbe					// bluetooth EOL internal flag
+// ASCII control character defines
+#define BT_LN	0x1a					// <CTRL-Z> bluetooth EOL internal flag -- 07/10/22, jmh: Changed from 0xbe to remove conflict with wired remote system
 #define SOH		0x01
 #define ETX		0x03
 #define	EOT		0x04
@@ -59,7 +60,7 @@
 #define NAK		0x15
 #define CAN		0x18
 #define ESC		27
-#define SW_ESC	0xa5					// sw restart escape code
+#define SW_ESC	0x19					// <CTRL-Y> sw restart escape code -- 07/10/22, jmh: Changed from 0xa5 to remove possible conflict with wired remote system
 #define	myEOF	26
 
 #define TI1		0x02					// SCON1 bitmaps

@@ -18,13 +18,30 @@
  *    				 !!! mem scan needs to disable string disp mode...
  *
  *    				 * SET loop: !!! performed with MFmic support -- no SET loop yet
- *    				 	- DIM brightness setting, LCD and button
+ *    				 	- DIM brightness setting, LCD and button -- DIM/BRT added to MFmic as shifted mic buttons ("1" brt, "4" dim), with 10 settings
  *    				 	- BRT brightness setting, LCD and button
  *    				 * VFO Scan mode
  *    				 * XIT/RIT adjust (perhaps use VFOchr_H ???)
- *
+ *					!!! mutetimer (mute_time()) never gets set, only read.  !?!?!
  *
  *    Project scope rev History:
+ *    <VERSION 0.13>	Post-field trial mods
+ *    07-11-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c, serial.h, radio.c/h
+ *    				    re-worked hm_cmd_exec() to improve fault tolerance
+ *    				    changed BT_LN define to <CTRL-Z> to remove conflict with wired remote protocol - Fixes MHz button press issues
+ *    				    changed SW_ESC define to <CTRL-Y> to prevent future conflicts with MFmic or other internal systems
+ *    				    Added beeps to FUNC shift changes.  1-beep shift on, 2-beeps shift off, 3-beeps, unrecognized key shift off
+ *    				    FUNC now allows shift to happen by pressing any valid shifted key.  Reduces keystrokes to just the added FUNC press.
+ *    				    	Still must un-shift
+ *    				    modified auto-baud lockout to correct it not locking out after first valid command (was interfering with MFmic packets)
+ *    				    Added prescaled timer group to reduce ISR overhead -- !!! need to move other 1ms/tic timers into the 10ms/tic group !!!
+ *    				    	:: Moved subtimer & settimer to prescaled group
+ *    				    Added shft_time() to control/monitor MFmic func-shift timeout.  Now, shift will timeout after 10 sec.  Timeout resets to 10 sec after
+ *    				    	each keypress.
+ *    				    Added defines for process_ and timer signals
+ *    				    Various function and formatting cleanups in radio.c
+ *
+ *    <VERSION 0.12>
  *    07-05-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c/h lcd.c/h
  *    				    Added support for HM-133wr MultiFunction-MIC support.  cmd_fn() intercepts mic data stream and sends signals to keypad code.  This allows
  *    						the system to use the wired remote to input command keys from the HM-1xx mics.
@@ -326,6 +343,7 @@ S8		xoffsent;						// xoff sent
 //-----------------------------------------------------------------------------
 // Local variables in this file
 //-----------------------------------------------------------------------------
+char	got_cmd;						// first valid cmd flag (freezes baud rate)
 U32		abaud;							// 0 = 115.2kb (the default)
 U8		iplt2;							// timer2 ipl flag
 U8		btredir;						// bluetooth cmd re-direct flag
@@ -349,6 +367,7 @@ U16		slidetimer;						// txt slide rate timer
 U16		scanmtimer;						// main scan timer
 U16		scanstimer;						// sub scan timer
 U16		hmktimer;						// sub scan timer
+U16		hm_shft_timer;					// MFmic function-shift timeout timer
 
 U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
@@ -429,7 +448,6 @@ int main(void){
     char	rebuf1[RE_BUFLEN];	// re-do buffer#2
     char	rebuf2[RE_BUFLEN];	// re-do buffer#3
     char	rebuf3[RE_BUFLEN];	// re-do buffer#4
-    char	got_cmd;			// first valid cmd flag (freezes baud rate)
     U8		argn;				// number of args
     char*	cmd_string;			// CLI processing ptr
     char*	args[ARG_MAX];		// ptr array into CLI args
@@ -447,7 +465,6 @@ int main(void){
     ipl = proc_init();									// initialize the processor I/O
     main_dial = 0;
     init_spi3();
-    cmd_fn_init();										// init cmd_fn statics
     do{													// outer-loop (do forever, allows soft-restart)
         rebufN[0] = rebuf0;								// init CLI re-buf pointers
     	rebufN[1] = rebuf1;
@@ -473,11 +490,10 @@ int main(void){
         set_pwm(5, 10);
         set_led(6, 1);
         set_pwm(6, 10);
-    	process_IO(0xff);								// init process_io
+    	process_IO(PROC_INIT);							// init process_io
     	btredir = 0;
     	// GPIO init
     	//...
-    	swcmd = 0;										// init SW command
     	// main loop
         do{
     		putchar_b(XON);
@@ -515,7 +531,7 @@ int main(void){
     			fault_found = TRUE;
     		}
         }while(swcmd != SW_ESC);
-        swcmd = 0;												// re-arm while-loop and restart...
+// this is done in process IPL        swcmd = 0;												// re-arm while-loop and restart...
 /*    	NVIC_DIS0_R = 0xFFFFFFFF;								// disable ISRs
     	NVIC_DIS1_R = 0xFFFFFFFF;
     	NVIC_DIS2_R = 0xFFFFFFFF;
@@ -564,6 +580,7 @@ int main(void){
 //
 //		NOTE: gets_tab is only used for command line input and thus should not
 //		see non-ascii data under normal circumstances.
+//		re-NOTE: The wired remote sees non-ASCII in the check byte by design.  Need to refurb this code...
 
 char *gets_tab(char *buf, char *save_buf[], int n){
 	char	*cp;
@@ -597,8 +614,37 @@ char *gets_tab(char *buf, char *save_buf[], int n){
     		}
     	}while(!c && !q);
     	if(!q){
+    		if(!got_cmd){
+                switch(c){
+        			case 0xE0:									// look for 19.2kb autoselect
+        				if(last_chr == 0xE0){
+        					abaud = 19200L;
+        					c = '\r';
+        				}
+        				break;
+
+        			case 0x00:									// look for 38.4kb or 9600b autoselect
+        				if(last_chr == 0x1C){
+        					abaud = 38400L;
+        					c = '\r';
+        				}else{
+        					if(last_chr == 0x00){
+        						abaud = 9600L;
+        						c = '\r';
+        					}
+        				}
+        				break;
+
+        			case 0x80:									// look for 57.6kb autoselect
+        				if(last_chr == 0xE6){
+        					abaud = 57600L;
+        					c = '\r';
+        				}
+        				break;
+                }
+    		}
             switch(c){
-    			case 0xE0:									// look for 19.2kb autoselect
+/*    			case 0xE0:									// look for 19.2kb autoselect
     				if(last_chr == 0xE0){
     					abaud = 19200L;
     					c = '\r';
@@ -622,7 +668,7 @@ char *gets_tab(char *buf, char *save_buf[], int n){
     					abaud = 57600L;
     					c = '\r';
     				}
-    				break;
+    				break;*/
 
                 case '\t':
     				if(i != 0){								// if tab, cycle through saved cmd buffers
@@ -718,20 +764,19 @@ char *gets_tab(char *buf, char *save_buf[], int n){
 char process_IO(U8 flag){
 
 	// process IPL init
-	if(flag == 0xff){									// perform init/debug fns
+	if(flag == PROC_INIT){								// perform init/debug fns
 		// init LCD
 		init_lcd();
-		ptt_mode = 0xff;								// force init
-		process_SOUT(flag);								// ! SOUT init must execute before SIN init !
-		process_SIN(flag);
-		process_UI(flag);
-//		process_CCMD(flag);
+		ptt_mode = 0xff;								// force init of ptt_mode reporting
+    	swcmd = 0;										// init SW command
 	}
-	process_SIN(0);
-	process_SOUT(0);
-	process_SIN(0);
-	process_UI(0);
-//	process_CCMD(0);									// process CCMD inputs
+	// perform periodic process updates					// ! SOUT init must execute before SIN init !
+	process_SIN(flag);									// Process changes to SIN data state
+	process_SOUT(flag);									// Process changes to SOUT data state
+	process_SIN(flag);									// countermeasure to increase SIN process priority
+	process_UI(flag);									// Process changes to the user interface state
+	process_CMD(flag);									// process CMD_FN state (primarily, the MFmic key-entry state machine)
+//	process_CCMD(flag);									// process CCMD inputs
 	return swcmd;
 }
 
@@ -1372,7 +1417,7 @@ U8 sub_time(U8 tf){
 		subtimer = 0;
 	}else{
 		if(tf){
-			subtimer = SUB_TIME;
+			subtimer = SUB_TIMEOUT;
 		}
 	}
 	if(subtimer) return TRUE;
@@ -1451,6 +1496,23 @@ U8 hmk_time(U8 tf){
 		}
 	}
 	if(hmktimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// shft_time() sets/reads the function-shift timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
+//-----------------------------------------------------------------------------
+U8 shft_time(U8 tf){
+
+	if(tf == 0xff){
+		hm_shft_timer = 0;
+		return FALSE;
+	}
+	if(tf == 1){
+		hm_shft_timer = SHFT_HOLD_TIME;
+	}
+	if(hm_shft_timer) return TRUE;
 	return FALSE;
 }
 
@@ -1656,7 +1718,7 @@ void Timer0A_ISR(void){
 //	transition rate, and cycle period.
 //-----------------------------------------------------------------------------
 void Timer3A_ISR(void){
-//static	U16	prescale;				// prescales the ms rate to the LED update rate
+static	U32	prescale;				// prescales the ms rate to the slow timer rates
 //		U16	t2_temp;				// temp
 //		U32	t2_temp32;
 //static	U8	keydb_tmr;
@@ -1696,7 +1758,7 @@ static	U16	key_last;				// last key
 		beepgaptimer = BEEP_GAP;
 		num_beeps = 0;
 		mictimer = 0;
-//		prescale = 0;				// init resp led regs
+		prescale = 0;				// init resp led regs
 	}
 	if(TIMER3_MIS_R & TIMER_MIS_TATOMIS){
 		// state machine to process local keypad
@@ -1811,7 +1873,7 @@ static	U16	key_last;				// last key
 		if (waittimer != 0){								// update wait timer
 			waittimer--;
 		}
-		if (waittimer2 != 0){								// update wait timer
+		if (waittimer2 != 0){								// update wait2 timer
 			waittimer2--;
 		}
 		if (sintimer != 0){									// update sin activity timer
@@ -1829,14 +1891,8 @@ static	U16	key_last;				// last key
 		if (qtimer != 0){									// update vol/squ adjust timer
 			qtimer--;
 		}
-		if (settimer != 0){									// update set mode timer
-			settimer--;
-		}
 		if (offstimer != 0){								// update offs adjust timer
 			offstimer--;
-		}
-		if (subtimer != 0){									// update sub adjust timer
-			subtimer--;
 		}
 		if (mictimer != 0){									// update mic button repeat timer
 			mictimer--;
@@ -1859,9 +1915,6 @@ static	U16	key_last;				// last key
 		if (scanstimer != 0){								// update sub scan timer
 			scanstimer--;
 		}
-		if (hmktimer != 0){								// update sub scan timer
-			hmktimer--;
-		}
 		if(num_beeps){
 			if (beepgaptimer != 0){							// update beep gap timer
 				--beepgaptimer;
@@ -1871,10 +1924,26 @@ static	U16	key_last;				// last key
 				beepgaptimer = BEEP_GAP;
 			}
 		}
-		if (dialtimer != 0){								// update wait timer
+		if (dialtimer != 0){								// update dial timer
 			if(!(--dialtimer)){
 				GPIO_PORTC_ICR_R = PORTC_DIAL;				// clear int flags
 				GPIO_PORTC_IM_R |= PORTC_DIAL;				// enable edge intr
+			}
+		}
+		// process 10ms timers
+		if(++prescale >= PRESCALE_TRIGGER){
+			prescale = 0;
+			if (hmktimer != 0){								// update MFmic protocol timer
+				hmktimer--;
+			}
+			if (hm_shft_timer != 0){						// update MFmic shift timer
+				hm_shft_timer--;
+			}
+			if (subtimer != 0){								// update sub adjust timer
+				subtimer--;
+			}
+			if (settimer != 0){								// update set mode timer
+				settimer--;
 			}
 		}
 	}

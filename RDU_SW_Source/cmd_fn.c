@@ -56,6 +56,7 @@ char* bcmd_resp_ptr;
 U8	hm_buf[HM_BUFF_END];				// signal buffer
 U8	hm_hptr;
 U8	hm_tptr;
+U8	shftm;								// fn-shift mem register (MFmic)
 
 // enum error message ID
 enum err_enum{ no_response, no_device, target_timeout };
@@ -227,6 +228,10 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
     			s = args[i];
     			str_toupper(s);
     		}
+/*    	}else{
+    		if(args[0][2] == 'r'){
+    			putsQ(";");
+    		}*/
     	}
 		t = args[0];															// point to first arg (cmd)
 		cmd_id = cmd_srch(t);													// search for command
@@ -463,9 +468,9 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					break;
 
 				case hm_cmd:													// process HM-133 MFmic data stream intercepts
-					putsQ("\n{hmc:");
+/*					putsQ("\n{hmc:");
 					putsQ(args[0]);		// debug !!!
-					putsQ("}\n");		// debug
+					putsQ("}\n");		// debug*/
 					hm_cmd_exec(args[0], 0);
 					break;
 
@@ -1934,72 +1939,125 @@ U8 str_chks(char* sptr){
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-// cmd_fn_init() initializes local statics (IPL)
-//-----------------------------------------------------------------------------
-
-void cmd_fn_init(void){
-
-	hm_hptr = 0;
-	hm_tptr = 0;
-	hm_cmd_exec((char*) 0, 0xff);
-	return;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//-----------------------------------------------------------------------------
 // hm_cmd_exec() executes the hm command intercept and fills the hm_buf[]
-//	This gets called once for each MFmic key packet received
+//	with keypress actions from the MFmic interface.  This stream gets merged
+//	with the main button stream inside main().
+//	This gets called once for each MFmic key packet received.  MFmic packets
+//	all start with '~'.  Valid packets have the following:
+//		pcsk\r
+//		p = '~'
+//		c = command chr
+//		s = status chr
+//		k = check = (c ^ s) | 0x80
+//		\r = carriage return (this is stripped by the cmd-ln pre-processing
+//			 and thus becomes a '\0' character)
+//		'c' and 's' are printable ASCII. 'k' is made to be a non-ASCII character
+//			by virtue of the hi-bit being set.  Setting the hi-bit also guarantees
+//			that the check won't ever be a null, allowing standard null-terminated
+//			array handling to be valid.
 //-----------------------------------------------------------------------------
-void hm_cmd_exec(char* sptr, U8 cmd){
-		U8	cm = '\0';
-		U8	hm;
-		U8	j;
-static	U8	hm_state;
+void hm_cmd_exec(char* sptr, U8 pcmd){
+		U8	cm;				// extracted command
+		U8	hm;				// extracted press/hold/release status
+		U8	j;				// temp
+//		U8	k;				// temp
+//		U8	m;				// temp
+//		U8	n;				// temp
+static	U8	hm_state;		// state machine process variable
+static	U8	cm_last;		// last cmd
+//static	U8	hm_last;		// last status
 
-	if(cmd == 0xff){
-		hm_map(0xff, 0xff);							// IPL init..
-		hm_state = HMST_INIT;
+	// IPL init of statics
+	if(pcmd == 0xff){
+		hm_map(0xff, 0xff);
+		hm_state = HMST_IDLE;
+//		hm_last = '\0';
+		cm_last = '\0';
 		return;
 	}
-	// validate command packet
+	// calculate check-digit -- check = (cmd ^ param) | 0x80
+/*	m = *(sptr+1);
+	k = *(sptr+2);
+	n = m ^ k;*/
+
 	j = (*(sptr+1) ^ *(sptr+2)) | 0x80;
+	// if command packet valid, process state machine
 	if((j == *(sptr+3)) && (*(sptr+4) == '\0')){
+//	if(*(sptr+4) == '\0'){
+		// capture command and press/hold/release status from the packet payload
 		cm = *(sptr+1);
 		hm = *(sptr+2);
+		// state machine to process key press-hold-release sequence
 		switch(hm_state){
 		default:
-		case HMST_INIT:
+		case HMST_IDLE:
+			// look for a press or hold (if we see a hold here, we assume that the press packet was missed)
 			if((hm == 'p') || (hm == 'h')){
-				hm_map(cm, 'p');					// map keypress into signal buffer
+				hm_map(cm, 'p');					// map initial keypress into signal buffer
 				hm_state = HMST_PRESS;				// point to next state
-				hmk_time(1);						// start hold timer
+				hmk_time(1);						// start hold timer (the same hold delay time as for the panel buttons)
+				cm_last = cm;						// save the command.  Us this saved value for subsequent actions until release
 			}
 			break;
 
 		case HMST_PRESS:
-			if((hm == 'h') && !hmk_time(0)){
-				hm_map(cm, hm);						// map hold keypress into signal buffer
-				hm_state = HMST_HOLD;				// point to next state
-				hmk_time(1);						// reset hold timer
-			}else{
-				if((hm == 'r')){
-					hm_map(cm, hm);					// map hold keypress into signal buffer
-					hm_state = HMST_INIT;			// point to next state
-					hmk_time(0xff);					// clear hold timer
+			if(cm_last != cm){
+				putsQ(("#")); //!!!
+			}
+			// At this point in the process, hold or release is expected
+			// a press is assumed to be a repeat press packet and is ignored
+			switch(hm){
+			case 'R':
+			case 'r':
+				hm_map(cm_last, 'r');				// map release into signal buffer
+				hm_state = HMST_IDLE;				// return to start
+				break;
+
+			case 'h':
+				if(!hmk_time(0)){					// if "hold" is indicated AND there is a timeout:
+					hm_map(cm_last, hm);			// map hold keypress into signal buffer
+					hm_state = HMST_HOLD;			// point to next state
+					hmk_time(1);					// reset hold timer
 				}
+				break;
+
+			default:
+				putsQ(("@")); //!!!
+				break;
 			}
 			break;
 
 		case HMST_HOLD:
-			if(hm == 'h'){
-				hmk_time(1);						// reset hold timer
+			// if there is a timeout of the hmk_timer, we assume a critical loss and force the keypress to be released
+			if(!hmk_time(0)){
+				hm = 'r';							// force release
 			}
-			if((!hmk_time(0)) || (hm == 'r') || (hm == 'R')){
-				hm_map(cm, 'r');					// map release keypress into signal buffer
-				hm_state = HMST_INIT;				// point to next state
-				hmk_time(0xff);						// clear timer
-			}else{
-				putsQ("^");
+			// once the hold mode is encountered, we look for release or a timeout (loss of comms from the MFmic).
+			switch(hm){
+			default:
+				break;
+
+			case 'h':								// a valid hold packet resets the timeout
+				hmk_time(1);
+				break;
+
+			case 'R':								// valid release
+			case 'r':
+				hm_map(cm_last, 'r');				// map release keypress into signal buffer
+				hm_state = HMST_IDLE;				// point to next state
+				cm_last = '\0';						// clear cmd mem
+				break;
+
+			// a press here is an error.  Assume that the release of the previous key was lost & start a new press sequence
+			case 'p':
+				// process the release of the previous key
+				hm_map(cm_last, 'r');				// map release keypress into signal buffer
+				// start a new press
+				hm_map(cm, 'p');					// map keypress into signal buffer
+				hm_state = HMST_PRESS;				// point to next state
+				hmk_time(1);						// start hold timer
+				cm_last = cm;						// set cmd mem
+				break;
 			}
 			break;
 		}
@@ -2014,118 +2072,174 @@ static	U8	hm_state;
 //char keychr_lut[] = {  TSchr, };
 void hm_map(U8 cm, U8 hm){
 		U8	j;
-static	U8	shftm;
 
 	// trap IPL init
-	if(cm == 0xff){
-		shftm = '\0';
+/*	if(cm == 0xff){
+		shftm = 0;
 		// init process indicator
 		asow(0);
 		return;
-	}
+	}*/
 	// trap null inputs
 	if((cm == '\0') || (hm == '\0')){
 		return;
 	}
+	if(!shftm){
+		switch(cm){
+		default:
+			break;
+
+//		case SH_LOKEY:
+		case SH_CALLKEY:
+		case SH_XFCKEY:
+		case SH_UPKEY:
+		case SH_VMKEY:
+		case SH_MWKEY:
+		case SH_DNKEY:
+		case SH_F1KEY:
+		case SH_F2KEY:
+		case SH_1:
+		case SH_2:
+		case SH_3:
+		case SH_A:
+		case SH_4:
+		case SH_5:
+		case SH_6:
+		case SH_B:
+		case SH_7:
+		case SH_8:
+		case SH_9:
+		case SH_C:
+		case SH_STR:
+		case SH_0:
+		case SH_PND:
+		case SH_D:
+			set_shift(1);
+/*			shftm = 1;
+			asow(1);
+			do_1beep();
+			shft_time(1);								// start the shift timer*/
+			break;
+		}
+	}
 	// map keys with shift mode active
 	if(shftm == 1){
+		shft_time(1);									// kick the shift timer
 		switch(cm){
 			default:
-				shftm = 0;
+				set_shift(0);
+/*				shftm = 0;								// undefined keys cancel shift mode
 				j = '\0';
 				// clear process indicator
-				asow(0);
+				asow(0);*/
+				do_1beep();
 				break;
 
 			case F2KEY:
 			case LOKEY:
-			case 'p':								// "p" == shift-toggle key
+			case SH_LOKEY:								// (FUNC-LOCK) == shift-toggle key
 				j = '\0';
 				if(hm == 'p'){
-					shftm ^= 1;
+					set_shift(0);
+/*					shftm = 0;
 					// update process indicator
-					if(shftm == 1){
-						asow(1);
-					}else{
-						asow(0);
-					}
+					asow(0);
+					do_2beep();*/
 				}
 				break;
 
-			case 'q':
 			case '\\':
 			case '/':
+				j = '\0';
+				// these keys do no-op
 				break;
 
+			case SH_CALLKEY:
 			case CALLKEY:
 				j = SETchr;
 				break;
 
+			case SH_XFCKEY:
 			case XFCKEY:
 				j = SUBchr;
 				break;
 
+			case SH_VMKEY:
 			case VMKEY:
 				j = MWchr;
 				break;
 
+			case SH_3:
 			case '3':
 				j = Qupchr;
 				break;
 
+			case SH_6:
 			case '6':
 				j = Qdnchr;
 				break;
 
+			case SH_A:
 			case 'A':
 				j = Vupchr;
 				break;
 
+			case SH_B:
 			case 'B':
 				j = Vdnchr;
 				break;
 
-// future
-/*			case 'D':
+/*// future
+			case 'SH_D':
+  			case 'D':
 				j = MODEchr;
 				break;*/
-// future
-/*			case '2':
-				j = DIALuchr;			// dial up/dn
+
+			case SH_2:
+  			case '2':
+//				j = ?;			// dial up (same as up/dn buttons at this point)
 				break;
 
+			case SH_5:
 			case '5':
-				j = DIALdchr;
-				break;*/
+//				j = ?;			// dial up (same as up/dn buttons at this point)
+				break;
 
+			case SH_1:
 			case '1':
 				if(hm == 'p'){
 					// bright
 					j = backl_adj(0xff) + 1;
 					if(j > BRT_MAX) j = BRT_MAX;
 					backl_adj(j);
+					do_1beep();
 				}
 				j = '\0';
 				break;
 
+			case SH_4:
 			case '4':
 				if(hm == 'p'){
 					// dim
 					j = backl_adj(0xff) - 1;
 					if(j > BRT_MAX) j = 0;
 					backl_adj(j);
+					do_1beep();
 				}
 				j = '\0';
 				break;
 
+			case SH_8:
 			case '8':
 				j = DUPchr;
 				break;
 
+			case SH_STR:
 			case '*':
 				j = TSchr;
 				break;
 
+			case SH_0:
 			case '0':
 				j = Tchr;
 				break;
@@ -2176,16 +2290,15 @@ static	U8	shftm;
 				break;
 
 			case F2KEY:
-			case 'p':
+			case SH_LOKEY:
 				j = '\0';
 				if(hm == 'p'){
-					shftm ^= 1;
+					set_shift(1);
+/*					shftm = 1;
 					// update process indicator
-					if(shftm == 1){
-						asow(1);
-					}else{
-						asow(0);
-					}
+					asow(1);
+					do_1beep();
+					shft_time(1);									// start the shift timer*/
 				}
 				break;
 
@@ -2197,7 +2310,7 @@ static	U8	shftm;
 	// j == mapped key
 	if(j){
 		switch(hm){
-		// invalid edge cmd
+//		// invalid edge cmd
 //		default:
 //			j = '\0';
 //			break;
@@ -2232,8 +2345,50 @@ static	U8	shftm;
 			}
 		}
 	}
+	return;
 } // end key processing
 
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// set_shift() sets/clears func shift mode
+//	returns shftm
+//-----------------------------------------------------------------------------
+U8 set_shift(U8 tf){
+
+	if(tf == 1){
+		shftm = 1;
+		asow(1);
+		do_1beep();
+		shft_time(1);								// start the shift timer
+	}
+	if(tf == 0){
+		shftm = 0;
+		asow(0);
+		do_2beep();
+		shft_time(0xff);							// clear the shift timer
+	}
+	return shftm;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// process_CMD() handles periodic polling tasks for the cmd_fn.c file scope
+//-----------------------------------------------------------------------------
+char process_CMD(U8 flag){
+
+	if(flag == PROC_INIT){
+		// init file-local statics
+		hm_hptr = 0;									// init MFmic head/tail buffer indexes
+		hm_tptr = 0;
+		shft_time(CLEAR_TIMER);							// clear timeout
+		return 0;
+	}
+	// process shift timeout -- turn off shift and execute beeps
+	if((shftm) && !shft_time(0)){
+		set_shift(0);									// un-shift and update DU status
+	}
+	return 0;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------

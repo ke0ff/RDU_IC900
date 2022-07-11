@@ -163,8 +163,8 @@ struct vfo_struct {
 
 #define	MHZ_TIME		SEC10		// MHZ digit mode timeout
 #define	VQ_TIME			SEC3		// vol/squ adj timeout
-#define	SET_TIME		(3*SEC10)	// set mode timeout
-#define	SUB_TIME		(3*SEC10)	// sub-focus timeout
+#define	SET_TIME		(3*PSEC10)	// set mode timeout
+#define	SUB_TIMEOUT		(3*PSEC10)	// sub-focus timeout
 #define	MIC_RPT_TIME	80			// mic u/d button 80ms repeat period
 #define	MIC_RPT_WAIT	1000		// mic u/d button repeat wait period
 #define	MIC_DB_TIME		20			// mic u/d button debounce wait period

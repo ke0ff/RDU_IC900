@@ -214,7 +214,7 @@ void process_UI(U8 cmd){
 
 	//**************************************
 	// process IPL (Initial Program Load) init
-	if(cmd == 0xff){
+	if(cmd == PROC_INIT){
 		GPIO_PORTD_DATA_R |= LOCK_SELECT;
 		wait(10);
 		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);				// force update of slide switch status
@@ -403,7 +403,7 @@ U8 process_MS(U8 mode){
 
 	//**************************************
 	// process IPL init
-	if(mode == 0xff){
+	if(mode == PROC_INIT){
 		maddr = MHZ_OFF;												// MHz/thumbwheel mode init
 		xmodeq = 0;														// x-modes
 		mute_mode = 0;													// smute = off
