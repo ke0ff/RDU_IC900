@@ -52,6 +52,7 @@
 #include "serial.h"
 #include "spi.h"
 #include "version.h"
+#include "cmd_fn.h"
 
 //-----------------------------------------------------------------------------
 // local declarations
@@ -164,7 +165,6 @@ U32	so_initc[] = {
 // **************************************************************
 // local Fn declarations
 
-U8 get_bandid(U32 freqMM);
 U8 get_busy(void);
 
 //-----------------------------------------------------------------------------
@@ -540,6 +540,7 @@ U8 process_SOUT(U8 cmd){
 //					sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
 //					putsQ(dgbuf);
 				sin_flags &= ~SIN_SEND_F;											// clear the signal
+				pttsub_togg(vfo_p[bandid_m].bflags & PTTSUB_M);						// issue ptt/sub action toggle command
 				k = 0xff;															// processing...
 			}else{
 				// process sout signals
@@ -762,6 +763,21 @@ void  save_mc(U8 focus){
 	rw8_nvr(j, mem[i], CS_WRITE | CS_OPEN);			// mem & call are adjacent in the NV map
 	rw8_nvr(j, call[i], CS_WRITE | CS_CLOSE);
 	return;
+}
+
+//-----------------------------------------------------------------------------
+// get_bflag() sets/returns bflag status
+//	focus = MAIN/SUB, cmd = 1 to set, 0 to read, bfset = set data (ignore if read)
+//-----------------------------------------------------------------------------
+U8  get_bflag(U8 focus, U8 cmd, U8 bfset){
+	U8	i;		// temps
+
+	if(focus == MAIN) i = bandid_m;
+	else i = bandid_s;
+	if(cmd){
+		vfo_p[i].bflags = bfset;
+	}
+	return vfo_p[i].bflags;
 }
 
 //-----------------------------------------------------------------------------
@@ -1847,6 +1863,17 @@ void copy_vfot(U8 main){
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
+// copy_2vfo() stores 32b VFO to indicated vfo
+//-----------------------------------------------------------------------------
+void copy_2vfo(U8 main, U32 vfod){
+
+    if(main == MAIN) vfo_p[bandid_m].vfo = vfod;
+    else vfo_p[bandid_s].vfo = vfod;
+    return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
 // temp_vfo() copies vfo to vfot
 //-----------------------------------------------------------------------------
 void temp_vfo(U8 main){
@@ -1863,6 +1890,16 @@ void temp_vfo(U8 main){
 U32 get_vfot(void){
 
     return vfot;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// get_vfo() returns vfo[bandid]
+//-----------------------------------------------------------------------------
+U32 get_vfo(U8 focus){
+
+    if(focus == MAIN) return vfo_p[bandid_m].vfo;
+    return vfo_p[bandid_s].vfo;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

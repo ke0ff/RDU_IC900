@@ -2071,7 +2071,8 @@ static	U8	cm_last;		// last cmd
 //-----------------------------------------------------------------------------
 //char keychr_lut[] = {  TSchr, };
 void hm_map(U8 cm, U8 hm){
-		U8	j;
+	U8	j;		// temps
+	U8	i;
 
 	// trap IPL init
 /*	if(cm == 0xff){
@@ -2189,11 +2190,40 @@ void hm_map(U8 cm, U8 hm){
 				j = Vdnchr;
 				break;
 
-/*// future
-			case 'SH_D':
+
+			case SH_D:
   			case 'D':
-				j = MODEchr;
-				break;*/
+  				// only act on press cmd
+  				if(hm == 'p'){
+  	  				// bflags hold the pttsub action status.  read the current bflags
+  	  				//	and advance the status
+  	  				i = get_bflag(MAIN, 0, 0);
+  	  				j = i & PTTSUB_M;
+  	  				j += PTTSUB_MOD1;
+  	  				i = i & ~PTTSUB_M;
+  	  				get_bflag(MAIN, 1, i | j);
+  	  				// response beeps indicate status
+  	  				switch(j){
+  	  				case PTTSUB_MOD0:
+  	  					do_1beep();
+  						break;
+
+  	  				case PTTSUB_MOD1:
+  	  					do_2beep();
+  	  					break;
+
+  	 				case PTTSUB_MOD2:
+  	  					do_3beep();
+  						break;
+
+  	 				default:
+  	  				case PTTSUB_MOD3:
+  	  					do_4beep();
+  	 					break;
+  	 				}
+  				}
+				j = '\0';
+				break;
 
 			case SH_2:
   			case '2':
@@ -2283,6 +2313,27 @@ void hm_map(U8 cm, U8 hm){
 
 			case 'B':
 				j = TONEchr;
+				break;
+
+			case '0':
+			case '1':
+			case '2':
+			case '3':
+			case '4':
+			case '5':
+			case '6':
+			case '7':
+			case '8':
+			case '9':
+				j = cm;
+				break;
+
+			case '#':
+				j = ENTchr;
+				break;
+
+			case '*':
+				j = DOTchr;
 				break;
 
 			case 'A':
@@ -2417,6 +2468,61 @@ U8 hm_asc(void){
 		}
 	}
 	return rtn;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// hm_sto() stores kkey code characters to the MFmic input stream
+//-----------------------------------------------------------------------------
+void hm_sto(U8 j){
+
+	// store to buffer
+	hm_buf[hm_hptr++] = j;
+	// Process rollover
+	if(hm_hptr == HM_BUFF_END){
+		hm_hptr = 0;
+	}
+	// Process overflow -- discards oldest entry
+	if(hm_hptr == hm_tptr){
+		hm_tptr += 1;
+		if(hm_tptr == HM_BUFF_END){
+			hm_tptr = 0;
+		}
+	}
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// pttsub_togg() issues call or smute toggle as an ersatz keypress based on
+//	the bflags
+//j |= KREL_FLAG;
+//-----------------------------------------------------------------------------
+	void pttsub_togg(U8 bflags){
+	U8	i;		//temp
+
+	i = bflags & PTTSUB_M;
+	switch(i){
+	default:				// nop
+		break;
+
+	case PTTSUB_SMUT:		// issue mute toggle
+		hm_sto(SMUTEchr);
+		break;
+
+	case PTTSUB_CALL:		// issue sub-call toggle
+		hm_sto(SSUBchr);
+		hm_sto(CALLchr);
+		hm_sto(RSUBchr);
+		break;
+
+	case PTTSUB_CALL|PTTSUB_SMUT:	// issue main-call toggle
+		hm_sto(MMAINchr);
+		hm_sto(CALLchr);
+		hm_sto(RMAINchr);
+		break;
+	}
+	return;
 }
 
 // eof

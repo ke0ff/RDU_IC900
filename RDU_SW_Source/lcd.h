@@ -50,6 +50,7 @@
 #define	NORM_DISP		0x03
 #define	TXTSLID_DISP	0x04
 #define	OFFS_DISP		0x05
+#define	DFE_DISP		0x06
 
 //#define VFOTR_IS_TX		0x40	// flag to signal fetch of vfotr to display TX frequency from uxpll update
 //#define VFO_DISP_F		0x80	// flag to signal vfo display update
@@ -65,7 +66,8 @@
 #define	MSCANS_XFLAG	0x80
 
 // Xz-flags
-//#define	OFFS_XFLAG	0x80
+//#define	OFFS_XFLAG	0x
+#define	DFE_MODE		0x20		// direct freq entry in progress
 #define	MSCANM1_XFLAG	0x40		// mem scan first active flags (M/S)
 #define	MSCANS1_XFLAG	0x80
 

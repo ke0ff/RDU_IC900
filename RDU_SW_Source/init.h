@@ -305,27 +305,44 @@ extern S8	xoffsent;			// xoff sent
 #define	KREL_FLAG		0x40			// flag bit for key release character
 #define	KEY_RELEASE_CHR	0x3e			// key release character
 // key press character defines
+#define	RMAINchr		65				// ersatz key -- restore from force main mode
+#define	MMAINchr		66				// ersatz key -- force main mode
+#define	RSUBchr			67				// ersatz key -- restore from force sub mode
+#define	SSUBchr			68				// ersatz key -- force sub mode
 #define	SUBchr			33
 #define	TONEchr			34
-#define	CALLchr			35
-#define	MWchr			36
-#define	TSchr			37
-#define	Tchr			38
-#define	Vupchr			39
-#define	Vdnchr			40
-#define	HILOchr			41
-#define	CHKchr			42
-#define	errorchr		43
+#define	ENTchr			35
+#define	CALLchr			36
+#define	MWchr			37
+#define	TSchr			38
+#define	Tchr			39
+#define	Vupchr			40
+#define	Vdnchr			41
+#define	HILOchr			42
+#define	CHKchr			43
+#define	errorchr		44
+#define	MSchr			45
+#define	DOTchr			46
+#define	DUPchr			47
 
-#define	MSchr			44
-#define	DUPchr			45
-#define	VFOchr			46
-#define	MRchr			47
-#define	MHZchr			48
-#define	SETchr			49
-#define	Qupchr			50
-#define	Qdnchr			51
-#define	SMUTEchr		52
+#define	ZEROchr			48				//////////////////////////
+#define	ONEchr			49				//						//
+#define	TWOchr			50				//						//
+#define	THREEchr		51				//						//
+#define	FOURchr			52				// these MUST be		//
+#define	FIVEchr			53				// ascii digit codes	//
+#define	SIXchr			54				//						//
+#define	SEVENchr		55				//						//
+#define	EIGHTchr		56				//						//
+#define	NINEchr			57				//////////////////////////
+
+#define	VFOchr			58
+#define	MRchr			59
+#define	MHZchr			60
+#define	SETchr			61
+#define	Qupchr			62
+#define	Qdnchr			63
+#define	SMUTEchr		64
 
 // HM MFmic character defines
 #define	LOKEY		'L'
@@ -453,6 +470,7 @@ void do_dial_beep(void);
 void do_1beep(void);
 void do_2beep(void);
 void do_3beep(void);
+void do_4beep(void);
 U8 sin_time(U8 cmd);
 U8 sout_time(U8 cmd);
 U8 mhz_time(U8 tf);

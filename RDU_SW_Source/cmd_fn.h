@@ -49,3 +49,4 @@ U8 hm_asc(void);
 //void cmd_fn_init(void);
 char process_CMD(U8 flag);
 U8 set_shift(U8 tf);
+void pttsub_togg(U8 bflags);

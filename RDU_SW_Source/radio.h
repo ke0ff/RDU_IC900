@@ -56,6 +56,13 @@ struct vfo_struct {
 #define	MEM_0		(VOL_0 + sizeof(U8))		// mem#
 #define	CALL_0		(MEM_0 + sizeof(U8))		// call-mem#
 #define	BFLAGS_0	(CALL_0 + sizeof(U8))		// expansion flags
+#define	PTTSUB_SMUT	0x40						// ptt-sub edge action mode bits and field mask
+#define	PTTSUB_CALL	0x80
+#define	PTTSUB_M	(PTTSUB_SMUT | PTTSUB_CALL)
+#define	PTTSUB_MOD0	0
+#define	PTTSUB_MOD1	PTTSUB_SMUT
+#define	PTTSUB_MOD2	PTTSUB_CALL
+#define	PTTSUB_MOD3	(PTTSUB_SMUT | PTTSUB_CALL)
 #define	SCANFLAGS_0	(BFLAGS_0 + sizeof(U8))		// scan (expansion) flags
 #define	TSA_0		(SCANFLAGS_0 + sizeof(U8))	// frq step "A"
 #define	TSB_0		(TSA_0 + sizeof(U8))		// frq step "B"
@@ -223,6 +230,7 @@ U32 get_freq(U8 focust);
 void copy_vfot(U8 main);
 void temp_vfo(U8 main);
 U32 get_vfot(void);
+U32 get_vfo(U8 focus);
 void  force_push_radio(void);
 U8 get_lohi(U8 bid, U8 setread);
 U8 get_memnum(U8 main, U8 adder);
@@ -255,3 +263,6 @@ U8 get_scanen(U8 bid, U8 memnum);
 U8 togg_scanmem(U8 focus);
 U32 get_memaddr(U8 band, U8 memnum);
 void set_memnum(U8 bid, U8 memnum);
+U8  get_bflag(U8 focus, U8 cmd, U8 bfset);
+U8 get_bandid(U32 freqMM);
+void copy_2vfo(U8 main, U32 vfod);

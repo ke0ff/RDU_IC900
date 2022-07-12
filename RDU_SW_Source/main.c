@@ -32,14 +32,24 @@
  *    				    changed SW_ESC define to <CTRL-Y> to prevent future conflicts with MFmic or other internal systems
  *    				    Added beeps to FUNC shift changes.  1-beep shift on, 2-beeps shift off, 3-beeps, unrecognized key shift off
  *    				    FUNC now allows shift to happen by pressing any valid shifted key.  Reduces keystrokes to just the added FUNC press.
- *    				    	Still must un-shift
+ *    				    	Still must un-shift.
  *    				    modified auto-baud lockout to correct it not locking out after first valid command (was interfering with MFmic packets)
  *    				    Added prescaled timer group to reduce ISR overhead -- !!! need to move other 1ms/tic timers into the 10ms/tic group !!!
- *    				    	:: Moved subtimer & settimer to prescaled group
+ *    				    	:: Moved subtimer & settimer to prescaled group.
  *    				    Added shft_time() to control/monitor MFmic func-shift timeout.  Now, shift will timeout after 10 sec.  Timeout resets to 10 sec after
  *    				    	each keypress.
  *    				    Added defines for process_ and timer signals
  *    				    Various function and formatting cleanups in radio.c
+ *    				    Implemented PTTSUB actions: none, smute toggle, sub-call toggle.  FUNC-D is config button, cycles through modes 0 - 3.
+ *    				    	modes 0 (1-beep) is no-action, mode 1 (2 beeps) is smute, mode 2 (3-beeps) is sub-call, and mode 3 (4-beeps) is main-call
+ *    				    	These features utilize a set of ersatz key codes to convey the desired actions to the processing code in lcd.c.  The "new"
+ *    				    	keys are force set-sub (sets sub regardless of initial status), restore from force sub (returns to as-was), and a similar pair
+ *    				    	for set-main.
+ *    				    Stubbed in direct frequency enter (DFE) mode.  Stubs allow the mode to be invoked and updates appear on the DU.  Cancel (*) is
+ *    				    	coded.  enter (#) command is coded, works if DFE band is already in main or sub. !!! need to do new band swap on ENT.
+ *    				    	!!! need to implement a timeout timer to auto cancel if no activity. !!! need to flash DP in DFE mode
+ *    				    Seems to be an issue with mem/call/vfo transistions.  There is a combination of this sequence that leaves the call freq in the VFO.
+ *    				    	see set_dfe() for notes.
  *
  *    <VERSION 0.12>
  *    07-05-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c/h lcd.c/h
@@ -1636,6 +1646,12 @@ void do_3beep(void){
 	return;
 }
 
+void do_4beep(void){
+
+	q_beep;										// 3x long beep
+	num_beeps = 3;
+	return;
+}
 
 //-----------------------------------------------------------------------------
 // gpiod_isr

@@ -101,6 +101,7 @@ U8	last_cosm_tp;					// head/tail pointers
 U8	last_cosm_hp;
 U8	last_coss_tp;
 U8	last_coss_hp;
+U32	dfe_vfo;						// direct freq entry temp vfo
 
 //-----------------------------------------------------------------------------
 // Local Fn Declarations
@@ -136,6 +137,8 @@ U32 mem2bit(U8 memnum);
 void get_mscan(U8 focus);
 void set_last_cos(U8 focus);
 U8 get_last_cos(U8 focus);
+U8 process_DFE(U8 focus, U8 keychr);
+void set_dfe(U8 focus, U8 bandsw, U8 k);
 
 //-----------------------------------------------------------------------------
 // init_lcd() initializes lcd resources
@@ -228,6 +231,7 @@ void process_UI(U8 cmd){
 		ptt_change = 0;
 		wait(100);
 		mute_radio(0);
+		dfe_vfo = 0;
 	}else{
 		//**************************************
 		// process the UI for each of the different modes:
@@ -387,12 +391,15 @@ void update_lcd(U8 focus, U8 forced_focus){
 //	returns mode changes
 //-----------------------------------------------------------------------------
 U8 process_MS(U8 mode){
-	static	 U32	iflags;
-	static	 U8		hflag;
+	static	U32		iflags;
+	static	U8		hflag;
+	static	U8		ssubfl;
 	U8	b;					// key beep counter
-	U8	i;					// temp
-//	U8	j;					// temp
-	U8	k;					// temp
+	U8	i;					// temps
+	U8	j;
+	U8	k;
+	U8	l;
+	U8	m;
 	U32	ii;
 	volatile U32	sin_a0;
 	volatile U32	sin_a1;
@@ -411,6 +418,7 @@ U8 process_MS(U8 mode){
 		hflag = 0;														// hold key flag
 		tsdisplay = 0;													// clear TS adj display mode
 		vfo_display = MAIN|SUB_D;										// force update of main/sub freq
+		ssubfl = MAIN;
 	}else{
 		//**************************************
 		// process SIN changes
@@ -611,6 +619,88 @@ U8 process_MS(U8 mode){
 				}
 				// if tx
 				force_push();											// force update to NVRAM
+				break;
+
+			case RMAINchr:												// restore force-MAIN button, initial press if already SUB, nop
+				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+					if(ssubfl != MAIN_MODE){
+						band_focus = SUB_MODE;
+						asub(1);
+						ats(read_dplx(SUB) & TSA_F);					// TS flag updates based on focus
+						sub_time(1);									// set sub timer
+						k = get_band_index(band_focus);					// reset focus pointer
+						i = get_lohi(band_focus, 0xff);
+						update_lcd(band_focus, SUB);
+						if(xmodeq & TEXTS_SLIDE){
+							update_radio_all(SUB_VQ);					// don't update freq if slider operating
+						}else{
+							update_radio_all(SUB_ALL);					// update all
+						}
+						b = 0;											// no beep
+					}
+				}
+				break;
+
+			case MMAINchr:												// force-MAIN button, initial press if already SUB, nop
+				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+					ssubfl = band_focus;								// save previous focus
+					if(band_focus != MAIN_MODE){
+						band_focus = MAIN_MODE;
+						asub(0);
+						ats(read_dplx(MAIN) & TSA_F);
+						sub_time(0xff);									// clear sub timer
+						k = get_band_index(band_focus);					// reset focus pointer
+						i = get_lohi(band_focus, 0xff);
+						update_lcd(band_focus, SUB);
+						if(xmodeq & TEXTS_SLIDE){
+							update_radio_all(SUB_VQ);					// don't update freq if slider operating
+						}else{
+							update_radio_all(SUB_ALL);					// update all
+						}
+						b = 0;											// no beep
+					}
+				}
+				break;
+
+			case RSUBchr:												// restore force-SUB button, initial press if already SUB, nop
+				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+					if(ssubfl == MAIN_MODE){
+						band_focus = MAIN_MODE;
+						asub(0);
+						ats(read_dplx(MAIN) & TSA_F);
+						sub_time(0xff);									// clear sub timer
+						k = get_band_index(band_focus);					// reset focus pointer
+						i = get_lohi(band_focus, 0xff);
+						update_lcd(band_focus, SUB);
+						if(xmodeq & TEXTS_SLIDE){
+							update_radio_all(SUB_VQ);					// don't update freq if slider operating
+						}else{
+							update_radio_all(SUB_ALL);					// update all
+						}
+						b = 0;											// no beep
+					}
+				}
+				break;
+
+			case SSUBchr:												// force-SUB button, initial press if already SUB, nop
+				if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+					ssubfl = band_focus;								// save previous focus
+					if(band_focus == MAIN_MODE){
+						band_focus = SUB_MODE;
+						asub(1);
+						ats(read_dplx(SUB) & TSA_F);					// TS flag updates based on focus
+						sub_time(1);									// set sub timer
+						k = get_band_index(band_focus);					// reset focus pointer
+						i = get_lohi(band_focus, 0xff);
+						update_lcd(band_focus, SUB);
+						if(xmodeq & TEXTS_SLIDE){
+							update_radio_all(SUB_VQ);					// don't update freq if slider operating
+						}else{
+							update_radio_all(SUB_ALL);					// update all
+						}
+						b = 0;											// no beep
+					}
+				}
 				break;
 
 			case SUBchr:												// SUB button, initial press
@@ -1095,6 +1185,93 @@ U8 process_MS(U8 mode){
 				hflag = 0;
 				break;
 
+			case ZEROchr:												// DFE mode processing
+			case ONEchr:
+			case TWOchr:
+			case THREEchr:
+			case FOURchr:
+			case FIVEchr:
+			case SIXchr:
+			case SEVENchr:
+			case EIGHTchr:
+			case NINEchr:
+				if(!(xmodez & DFE_MODE)){
+					xmodez |= DFE_MODE;
+					dfe_vfo = 0;
+				}								// !- do not place a break here -!
+			case DOTchr:
+				if(xmodez & DFE_MODE){
+					b = process_DFE(band_focus, i);
+				}else{
+					b = 0;
+				}
+				break;
+
+			case ENTchr:
+				if(xmodez & DFE_MODE){
+					if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+						j = get_bandid(dfe_vfo / 1000L);
+						if(band_focus == MAIN){
+							m = get_bandid(get_vfo(MAIN) / 1000L);
+							if(j != m){
+								l = get_bandid(get_vfo(SUB) / 1000L);
+								if(j == l){
+									// swap
+									set_swap_band();
+									if(mute_mode & SUB_MUTE){
+										adjust_vol(MAIN, 0);							// restore main vol
+									}
+									update_lcd(band_focus, MAIN);
+									update_lcd(band_focus, SUB);
+									update_radio_all(UPDATE_ALL);
+									force_push();										// force update to NVRAM
+									// keep same band
+									set_dfe(band_focus, 0, k);
+									b = 2;
+								}else{
+									// call up new band (if installed)
+									b = 4;	// !!!
+								}
+							}else{
+								// keep same band
+								set_dfe(band_focus, 0, k);
+								b = 2;
+							}
+						}else{
+							m = get_bandid(get_vfo(SUB) / 1000L);
+							if(j != m){
+								l = get_bandid(get_vfo(MAIN) / 1000L);
+								if(j == l){
+									// swap
+									set_swap_band();
+									if(mute_mode & SUB_MUTE){
+										adjust_vol(MAIN, 0);							// restore main vol
+									}
+									update_lcd(band_focus, MAIN);
+									update_lcd(band_focus, SUB);
+									update_radio_all(UPDATE_ALL);
+									force_push();										// force update to NVRAM
+									// keep same band
+									set_dfe(band_focus, 0, k);
+									b = 2;
+								}else{
+									// call up new band (if installed)
+									b = 4;	// !!!
+								}
+							}else{
+								// keep same band
+								set_dfe(band_focus, 0, k);
+								b = 2;
+							}
+						}
+					}
+				}else{
+					b = 0;
+				}
+
+				process_DFE(band_focus, ENTchr);									// exit DFE mode
+				break;
+
 			default:
 				b = 0;	// no beeps
 				break;
@@ -1109,6 +1286,14 @@ U8 process_MS(U8 mode){
 				do_2beep();
 				break;
 
+			case 3:
+				do_3beep();
+				break;
+
+			case 4:
+				do_4beep();
+				break;
+
 			default:
 				break;
 			}
@@ -1116,6 +1301,79 @@ U8 process_MS(U8 mode){
 	}
 	return band_focus;
 }	// end process_MS()
+
+//-----------------------------------------------------------------------------
+// set_dfe() sets radio to dfe vfo
+// !!! so far... this works if in vfo, mem, & call modes.  However, there seems to be a snafu
+//	when jumping from mem to/fr call whereby the call freq ends up in the VFO.  Not sure if this
+//	is related to DFE... !!!
+//-----------------------------------------------------------------------------
+void set_dfe(U8 focus, U8 bandsw, U8 k){
+	U8	i;		// temp
+
+	// if mem mode, turn off
+	i = xmode[k];
+	if(i & CALL_XFLAG) xmode[k] &= ~(MC_XFLAG);		// turn off call
+	if(i & MEM_XFLAG){
+		mema(focus, 0);								// turn off "M"
+		xmode[k] &= ~MEM_XFLAG;
+	}
+	copy_2vfo(focus, dfe_vfo);
+	write_xmode(focus);
+	update_lcd(focus, focus);
+	if(focus == MAIN) i = MAIN_ALL;
+	else i = SUB_ALL;
+	update_radio_all(i);
+
+/*	if(bandsw){								// band switch
+		force_push();						// force update to NVRAM
+		set_bandnv();
+	}*/
+	// xfr dfe to vfo
+//	rflags |= SIN_SSRF_F;					// force update of SSRF
+//	save_mc(focus);							// save changes to NVRAM
+//	update_lcd(focus, SUB);
+//	update_radio_all(SUB_ALL);
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// process_DFE processes MFmic numeric keys and updates dfe_vfo
+//	freq entry starts with msdig and proceeds until the KHz digit is entered.
+//	MFmic "#" button is "ENTER" and "*" button is "CANCEL"
+//-----------------------------------------------------------------------------
+U8 process_DFE(U8 focus, U8 keychr){
+	U32	d;		// digit temp
+	U8	b = 1;		// beep count
+
+	switch(keychr){
+	case ENTchr:								// enter, process to VFO
+		// determine band of new freq and test to see if band module present.  if so, switch to the new band and xfr the VFO
+		xmodez &= ~DFE_MODE;					// exit
+		b = 2;
+		break;
+
+	case DOTchr:
+		xmodez &= ~DFE_MODE;					// cancel
+		b = 3;
+		break;
+
+	case 0xff:									// nop, just trigger vfo update
+		break;
+
+	default:
+		d = keychr - '0';						// convert digit to numeral
+		dfe_vfo *= 10;							// slide new digit into temp
+		dfe_vfo += d;
+		break;
+	}
+	if(focus == MAIN){							// trigger DU update
+		vfo_display |= MAIN;
+	}else{
+		vfo_display |= SUB_D;
+	}
+	return b;
+}
 
 //-----------------------------------------------------------------------------
 // disp_duplex() updates duplex LCD icons based on duplex and focus
@@ -1167,15 +1425,19 @@ void process_VFODISP(U8 focus){
 
 	if(vfo_display){
 		// calculate display mode for switch() frame:				// This makes it easier to maintain the VFO display modes (now and future)
-		if(xmodeq & (TONE_XFLAG|OFFS_XFLAG)){
-			j = TONE_DISP;
+		if(xmodez & DFE_MODE){
+			j = DFE_DISP;
 		}else{
-			if(tsdisplay){
-				j = TS_DISP;
+			if(xmodeq & (TONE_XFLAG|OFFS_XFLAG)){
+				j = TONE_DISP;
 			}else{
-				if(focus == MAIN) i = TEXTM_SLIDE;
-				else i = TEXTS_SLIDE;
-				if(!(xmodeq & i)) j = NORM_DISP;
+				if(tsdisplay){
+					j = TS_DISP;
+				}else{
+					if(focus == MAIN) i = TEXTM_SLIDE;
+					else i = TEXTS_SLIDE;
+					if(!(xmodeq & i)) j = NORM_DISP;
+				}
 			}
 		}
 		// dispatch switch() - each "case" is a display mode
@@ -1220,6 +1482,21 @@ void process_VFODISP(U8 focus){
 			}
 			vfo_display &= ~(VMODE_TSDISP);
 			break;
+
+			case DFE_DISP:
+				// direct freq entry VFO display
+				if(vfo_display & MAIN){
+					mfreq(dfe_vfo, 0);							// update main freq display from vfo or vfotr
+					vfo_display &= ~(VMODE_ISTX | MAIN);
+				}else{
+					if(vfo_display & SUB_D){
+						if(!(xmodeq & TEXTS_SLIDE)){
+							sfreq(dfe_vfo, 0);
+						}
+						vfo_display &= ~(SUB_D);
+					}
+				}
+				break;
 
 		case NORM_DISP:
 			// normal VFO display
