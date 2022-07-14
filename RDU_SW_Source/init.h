@@ -297,18 +297,23 @@ extern S8	xoffsent;			// xoff sent
 #define	KEY_PRESCALE	10				// sets COL hold time (in ms +1)
 #define HM_KEY_HOLD_TIME (PSEC1)		// keypad hold timer value (~~ 1 sec)
 #define SHFT_HOLD_TIME	(PSEC10) 		// MFmic func-shift timeout (~~ 10 sec)
+#define DFE_TO_TIME		(PSEC10)		// dfe timeout value
 // keypad hold timer value (~~ 1 sec)
 #define KEY_HOLD_TIME	((HM_KEY_HOLD_TIME * PS_PER_TIC)/KEY_PRESCALE)
 #define	KEY_HOLD_KEY	0x8000			// set hi bit of key buffer entry to signal hold
 #define	KEY_RELEASE_KEY	0x4000			// key release keycode
 #define	KHOLD_FLAG		0x80			// flag bit for key hold character
 #define	KREL_FLAG		0x40			// flag bit for key release character
-#define	KEY_RELEASE_CHR	0x3e			// key release character
+
 // key press character defines
-#define	RMAINchr		65				// ersatz key -- restore from force main mode
-#define	MMAINchr		66				// ersatz key -- force main mode
-#define	RSUBchr			67				// ersatz key -- restore from force sub mode
-#define	SSUBchr			68				// ersatz key -- force sub mode
+// No keys can be greater than 0x3F (63)  Also, ESC (27) is not allowed
+#define	RMAINchr		28				// ersatz key -- restore from force main mode
+#define	MMAINchr		29				// ersatz key -- force main mode
+#define	RSUBchr			30				// ersatz key -- restore from force sub mode
+#define	SSUBchr			31				// ersatz key -- force sub mode
+										// !! no hold or release codes for ersatz keys !!
+
+#define	SMUTEchr		32
 #define	SUBchr			33
 #define	TONEchr			34
 #define	ENTchr			35
@@ -342,7 +347,6 @@ extern S8	xoffsent;			// xoff sent
 #define	SETchr			61
 #define	Qupchr			62
 #define	Qdnchr			63
-#define	SMUTEchr		64
 
 // HM MFmic character defines
 #define	LOKEY		'L'
@@ -382,49 +386,49 @@ extern S8	xoffsent;			// xoff sent
 #define	SH_D		't'
 
 // key hold chr codes
-#define	SUBchr_H		(33 | KHOLD_FLAG)
-#define	TONEchr_H		(34 | KHOLD_FLAG)
-#define	CALLchr_H		(35 | KHOLD_FLAG)
-#define	MWchr_H			(36 | KHOLD_FLAG)
-#define	TSchr_H			(37 | KHOLD_FLAG)
-#define	Tchr_H			(38 | KHOLD_FLAG)
-#define	Vupchr_H		(39 | KHOLD_FLAG)
-#define	Vdnchr_H		(40 | KHOLD_FLAG)
-#define	HILOchr_H		(41 | KHOLD_FLAG)
-#define	CHKchr_H		(42 | KHOLD_FLAG)
-#define	errorchr_H		(43 | KHOLD_FLAG)
+#define	SUBchr_H		(SUBchr   | KHOLD_FLAG)
+#define	TONEchr_H		(TONEchr  | KHOLD_FLAG)
+#define	CALLchr_H		(CALLchr  | KHOLD_FLAG)
+#define	MWchr_H			(MWchr    | KHOLD_FLAG)
+#define	TSchr_H			(TSchr    | KHOLD_FLAG)
+#define	Tchr_H			(Tchr     | KHOLD_FLAG)
+#define	Vupchr_H		(Vupchr   | KHOLD_FLAG)
+#define	Vdnchr_H		(Vdnchr   | KHOLD_FLAG)
+#define	HILOchr_H		(HILOchr  | KHOLD_FLAG)
+#define	CHKchr_H		(CHKchr   | KHOLD_FLAG)
+#define	errorchr_H		(errorchr | KHOLD_FLAG)
 
-#define	MSchr_H			(44 | KHOLD_FLAG)
-#define	DUPchr_H		(45 | KHOLD_FLAG)
-#define	VFOchr_H		(46 | KHOLD_FLAG)
-#define	MRchr_H			(47 | KHOLD_FLAG)
-#define	MHZchr_H		(48 | KHOLD_FLAG)
-#define	SETchr_H		(49 | KHOLD_FLAG)
-#define	Qupchr_H		(50 | KHOLD_FLAG)
-#define	Qdnchr_H		(51 | KHOLD_FLAG)
-#define	SMUTEchr_H		(52 | KHOLD_FLAG)
+#define	MSchr_H			(MSchr    | KHOLD_FLAG)
+#define	DUPchr_H		(DUPchr   | KHOLD_FLAG)
+#define	VFOchr_H		(VFOchr   | KHOLD_FLAG)
+#define	MRchr_H			(MRchr    | KHOLD_FLAG)
+#define	MHZchr_H		(MHZchr   | KHOLD_FLAG)
+#define	SETchr_H		(SETchr   | KHOLD_FLAG)
+#define	Qupchr_H		(Qupchr   | KHOLD_FLAG)
+#define	Qdnchr_H		(Qdnchr   | KHOLD_FLAG)
+#define	SMUTEchr_H		(SMUTEchr | KHOLD_FLAG)
 // key release chr codes
-#define	SUBchr_R		(33 | KREL_FLAG)
-#define	TONEchr_R		(34 | KREL_FLAG)
-#define	CALLchr_R		(35 | KREL_FLAG)
-#define	MWchr_R			(36 | KREL_FLAG)
-#define	TSchr_R			(37 | KREL_FLAG)
-#define	Tchr_R			(38 | KREL_FLAG)
-#define	Vupchr_R		(39 | KREL_FLAG)
-#define	Vdnchr_R		(40 | KREL_FLAG)
-#define	HILOchr_R		(41 | KREL_FLAG)
-#define	CHKchr_R		(42 | KREL_FLAG)
-#define	errorchr_R		(43 | KREL_FLAG)
+#define	SUBchr_R		(SUBchr   | KREL_FLAG)
+#define	TONEchr_R		(TONEchr  | KREL_FLAG)
+#define	CALLchr_R		(CALLchr  | KREL_FLAG)
+#define	MWchr_R			(MWchr    | KREL_FLAG)
+#define	TSchr_R			(TSchr    | KREL_FLAG)
+#define	Tchr_R			(Tchr     | KREL_FLAG)
+#define	Vupchr_R		(Vupchr   | KREL_FLAG)
+#define	Vdnchr_R		(Vdnchr   | KREL_FLAG)
+#define	HILOchr_R		(HILOchr  | KREL_FLAG)
+#define	CHKchr_R		(CHKchr   | KREL_FLAG)
+#define	errorchr_R		(errorchr | KREL_FLAG)
 
-#define	MSchr_R			(44 | KREL_FLAG)
-#define	DUPchr_R		(45 | KREL_FLAG)
-#define	VFOchr_R		(46 | KREL_FLAG)
-#define	MRchr_R			(47 | KREL_FLAG)
-#define	MHZchr_R		(48 | KREL_FLAG)
-#define	SETchr_R		(49 | KREL_FLAG)
-#define	Qupchr_R		(50 | KREL_FLAG)
-#define	Qdnchr_R		(51 | KREL_FLAG)
-#define	SMUTEchr_R		(52 | KREL_FLAG)
+#define	MSchr_R			(MSchr    | KREL_FLAG)
+#define	DUPchr_R		(DUPchr   | KREL_FLAG)
+#define	VFOchr_R		(VFOchr   | KREL_FLAG)
+#define	MRchr_R			(MRchr    | KREL_FLAG)
+#define	MHZchr_R		(MHZchr   | KREL_FLAG)
+#define	SETchr_R		(SETchr   | KREL_FLAG)
+#define	Qupchr_R		(Qupchr   | KREL_FLAG)
+#define	Qdnchr_R		(Qdnchr   | KREL_FLAG)
+#define	SMUTEchr_R		(SMUTEchr | KREL_FLAG)
 
 #define	HIB_APPL	0					// HIB is being accessed by application
 #define	HIB_INTR	1					// HIB may be accessed by intrpt
@@ -479,6 +483,7 @@ U8 q_time(U8 tf);
 U8 set_time(U8 tf);
 U8 offs_time(U8 tf);
 U8 hmk_time(U8 tf);
+U8 dfe_time(U8 tf);
 U8 shft_time(U8 tf);
 U8 sub_time(U8 tf);
 U8 mic_time(U8 tf);
@@ -487,6 +492,7 @@ U8 mute_time(U8 tf);
 U8 ts_time(U8 tf);
 U8 slide_time(U8 tf);
 U8 scan_time(U8 focus, U8 tf);
+U8 ipl_time(U8 tf);
 U32 get_free(void);
 
 void set_beep(U16 beep_frq, U16 b_count);

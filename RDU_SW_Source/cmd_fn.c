@@ -163,6 +163,7 @@ U32 dpl_calc(U16 dplcode);
 U8 cadd(U16 dplcode, U8 index);
 void hm_cmd_exec(char* sptr, U8 cmd);
 void hm_map(U8 cm, U8 hm);
+void hm_sto(U8 j);
 
 //=============================================================================
 // CLI cmd processor entry point
@@ -2383,7 +2384,8 @@ void hm_map(U8 cm, U8 hm){
 			break;
 		}
 		// store to buffer
-		hm_buf[hm_hptr++] = j;
+		hm_sto(j);
+/*		hm_buf[hm_hptr++] = j;
 		// Process rollover
 		if(hm_hptr == HM_BUFF_END){
 			hm_hptr = 0;
@@ -2394,7 +2396,7 @@ void hm_map(U8 cm, U8 hm){
 			if(hm_tptr == HM_BUFF_END){
 				hm_tptr = 0;
 			}
-		}
+		}*/
 	}
 	return;
 } // end key processing

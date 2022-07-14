@@ -26,7 +26,7 @@
  *
  *    Project scope rev History:
  *    <VERSION 0.13>	Post-field trial mods
- *    07-11-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c, serial.h, radio.c/h
+ *    07-13-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c, serial.h, radio.c/h
  *    				    re-worked hm_cmd_exec() to improve fault tolerance
  *    				    changed BT_LN define to <CTRL-Z> to remove conflict with wired remote protocol - Fixes MHz button press issues
  *    				    changed SW_ESC define to <CTRL-Y> to prevent future conflicts with MFmic or other internal systems
@@ -45,11 +45,16 @@
  *    				    	These features utilize a set of ersatz key codes to convey the desired actions to the processing code in lcd.c.  The "new"
  *    				    	keys are force set-sub (sets sub regardless of initial status), restore from force sub (returns to as-was), and a similar pair
  *    				    	for set-main.
- *    				    Stubbed in direct frequency enter (DFE) mode.  Stubs allow the mode to be invoked and updates appear on the DU.  Cancel (*) is
- *    				    	coded.  enter (#) command is coded, works if DFE band is already in main or sub. !!! need to do new band swap on ENT.
- *    				    	!!! need to implement a timeout timer to auto cancel if no activity. !!! need to flash DP in DFE mode
- *    				    Seems to be an issue with mem/call/vfo transistions.  There is a combination of this sequence that leaves the call freq in the VFO.
+ *    				    Added direct frequency enter (DFE) mode.  Allows the mode to be invoked by pressing numeric keys.  Cancel (*) aborts the mode,
+ *    				    	and enter (#) accepts the entry and exits the mode. flashes DP2 when DFE mode is active. implemented a timeout timer to auto
+ *							cancel DFE if no activity (10sec).
+ *
+ *							!!! need to validate new freq @RF
+ *
+ *    				    Had to "fix" DP/M6 handling in mfreq/sfreq to allow DP2 to be controlled
+ *    				    !!! Seems to be an issue with mem/call/vfo transitions.  There is a combination of this sequence that leaves the call freq in the VFO.
  *    				    	see set_dfe() for notes.
+ *    				    Added boot message to LCD.  Boot msg cancels after 5 sec (IPL_TIME) or any button press or PTT
  *
  *    <VERSION 0.12>
  *    07-05-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c/h lcd.c/h
@@ -305,6 +310,7 @@
 #include "eeprom.h"
 #include "lcd.h"
 #include "radio.h"
+#include "uxpll.h"
 #include "spi.h"
 //#include "encoder.h"
 
@@ -378,6 +384,8 @@ U16		scanmtimer;						// main scan timer
 U16		scanstimer;						// sub scan timer
 U16		hmktimer;						// sub scan timer
 U16		hm_shft_timer;					// MFmic function-shift timeout timer
+U16		dfe_timer;						// dfe timeout timer
+U16		ipl_timer;						// ipl timeout timer
 
 U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
@@ -476,6 +484,7 @@ int main(void){
     main_dial = 0;
     init_spi3();
     do{													// outer-loop (do forever, allows soft-restart)
+    	ipl_time(1);									// set IPL timer
         rebufN[0] = rebuf0;								// init CLI re-buf pointers
     	rebufN[1] = rebuf1;
     	rebufN[2] = rebuf2;
@@ -502,6 +511,8 @@ int main(void){
         set_pwm(6, 10);
     	process_IO(PROC_INIT);							// init process_io
     	btredir = 0;
+    	sprintf(buf,"NVsrt %0x, NVend %0x", NVRAM_BASE, MEM_END);
+    	putsQ(buf);
     	// GPIO init
     	//...
     	// main loop
@@ -783,7 +794,9 @@ char process_IO(U8 flag){
 	// perform periodic process updates					// ! SOUT init must execute before SIN init !
 	process_SIN(flag);									// Process changes to SIN data state
 	process_SOUT(flag);									// Process changes to SOUT data state
-	process_SIN(flag);									// countermeasure to increase SIN process priority
+	if(flag != PROC_INIT){
+		process_SIN(flag);								// countermeasure to increase SIN process priority
+	}
 	process_UI(flag);									// Process changes to the user interface state
 	process_CMD(flag);									// process CMD_FN state (primarily, the MFmic key-entry state machine)
 //	process_CCMD(flag);									// process CCMD inputs
@@ -1472,6 +1485,19 @@ U8 micdb_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
+// ipl_time() sets/reads the ipl timeout timer
+//	(tf == 0 reads, 1 sets)
+//-----------------------------------------------------------------------------
+U8 ipl_time(U8 tf){
+
+	if(tf == 1){
+		ipl_timer = IPL_TIME;
+	}
+	if(ipl_timer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 // mute_time() sets/reads the vol mute timer
 //	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
@@ -1485,6 +1511,23 @@ U8 mute_time(U8 tf){
 		}
 	}
 	if(mutetimer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// dfe_time() sets/reads the dfe timeout timer
+//	(tf == 0 reads, 1 sets, 0xff clears)
+//-----------------------------------------------------------------------------
+U8 dfe_time(U8 tf){
+
+	if(tf == 0xff){
+		dfe_timer = 0;
+		return FALSE;
+	}
+	if(tf == 1){
+		dfe_timer = DFE_TO_TIME;
+	}
+	if(dfe_timer) return TRUE;
 	return FALSE;
 }
 
@@ -1961,10 +2004,16 @@ static	U16	key_last;				// last key
 			if (settimer != 0){								// update set mode timer
 				settimer--;
 			}
+			if (dfe_timer != 0){							// update dfe timer
+				dfe_timer--;
+			}
+			if (ipl_timer != 0){							// update ipl timer
+				ipl_timer--;
+			}
 		}
 	}
 //	GPIO_PORTB_DATA_R &= ~LOCK;			// toggle debug pin
-	TIMER3_ICR_R = TIMERA_MIS_MASK;								// clear all A-intr
+	TIMER3_ICR_R = TIMERA_MIS_MASK;							// clear all A-intr
 	return;
 }
 

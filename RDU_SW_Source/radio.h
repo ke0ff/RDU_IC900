@@ -29,6 +29,8 @@
 #define	XIT_HIB_ADR		3
 #define	RIT_HIB_ADR		7
 
+// VFO defines
+#define	MAX_VFO	1350000L			// max valid VFO
 // VFO struct
 struct vfo_struct {
 	U32	vfo;						// main vfo frequency (RX) in KHz
@@ -88,7 +90,7 @@ struct vfo_struct {
 #define	MEM_STR_ADDR	(sizeof(U32) + sizeof(U16) + (sizeof(U8) * 7))
 #define	NUM_MEMS	34							// 30 mems, + 4 call mems
 #define	MAX_MEM		30
-#define	CALL_MEM	30
+#define	CALL_MEM	30							// first call mem#
 
 #define	ID10M_MEM	MEM0_BASE
 #define	ID6M_MEM	(ID10M_MEM + (NUM_MEMS * MEM_LEN))
@@ -182,6 +184,7 @@ struct vfo_struct {
 #define	SCAN_TIME2		SEC1		// scan channel LOS hold time
 #define	SCAN_TIME3		SEC100MS	// scan band switch debounce time
 #define	SCAN_TIME4		(SCAN_TIME - SCAN_TIME3)	// scan band switch debounce time
+#define	IPL_TIME		PSEC5		// volume mute delay for band swaps
 
 // set/read_tsab():
 #define	TSA_SEL			1			// selects TSA
@@ -264,5 +267,5 @@ U8 togg_scanmem(U8 focus);
 U32 get_memaddr(U8 band, U8 memnum);
 void set_memnum(U8 bid, U8 memnum);
 U8  get_bflag(U8 focus, U8 cmd, U8 bfset);
-U8 get_bandid(U32 freqMM);
+U8 get_modulid(U32 freqMM);
 void copy_2vfo(U8 main, U32 vfod);

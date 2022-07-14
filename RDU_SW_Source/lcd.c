@@ -42,12 +42,12 @@
 U8	lcd_init_1[] = { 0x45, 0x49, CLR_DMEM, CLR_BMEM, DISP_ON, BLINK_FAST };	// CS1 chip init
 U8	lcd_init_2[] = { 0x85, 0x49, CLR_DMEM, CLR_BMEM, DISP_ON, BLINK_FAST};	// CS2 chip init
 U8	lcd_mfreq_1[] = { 0x43, 0xe9, OR_DMEM, WITH_DECODE };					// set pointer, "5"00 hz = no change, WITH seg decoder
-U8	lcd_mfreq_2[] = { 0x41, 0xd4 };											// MDP
-U8	lcd_mfreq_3[] = { 0x41, 0xd0 };											// no MDP
+//U8	lcd_mfreq_2[] = { 0x41, 0xd4 };											// MDP
+//U8	lcd_mfreq_3[] = { 0x41, 0xd0 };											// no MDP
 U8	lcd_mraw[] = { CS1_MASK | 3, LOAD_PTR | 9, OR_DMEM, WITHOUT_DECODE };	// set pointer, "5"00 hz = no change, WITHOUT seg decoder
 U8	lcd_sfreq_1[] = { 0x83, 0xe7, OR_DMEM, WITH_DECODE };					// set pointer, "5"00 hz = no change, WITH seg decoder
-U8	lcd_sfreq_2[] = { 0x81, 0xd4 };											// SDP
-U8	lcd_sfreq_3[] = { 0x81, 0xd0 };											// no MDP
+//U8	lcd_sfreq_2[] = { 0x81, 0xd4 };											// SDP
+//U8	lcd_sfreq_3[] = { 0x81, 0xd0 };											// no SDP
 U8	lcd_sraw[] = { CS2_MASK | 3, LOAD_PTR | 7, OR_DMEM, WITHOUT_DECODE };	// set pointer, "5"00 hz = no change, WITHOUT seg decoder
 // VOL/SQU low-order ordinal sequence.  A list of segment patterns for the MEM digit during VOL/SQU adjust
 U8	lcd_qv_lsd[5][3] = {													// list of 5 7-seg ordinal patterns
@@ -125,8 +125,18 @@ void mset_500hz(U8 cmd);
 void sset_500hz(U8 cmd);
 void mon_500hz(U8 tf);
 void son_500hz(U8 tf);
+void mm6(U8 tf);
+void sm6(U8 tf);
+void mdp(U8 tf);
+void sdp(U8 tf);
+
 void mblink_500hz(U8 tf);
 void sblink_500hz(U8 tf);
+void dp_blink(U8 tf);
+void mdp2_blink(U8 tf);
+void sdp_blink(U8 tf);
+void sdp2_blink(U8 tf);
+
 void mmute_action(U8* mute_flag);
 void smute_action(U8* mute_flag);
 U8 puts_lcd(U8 focus, char *s, U8 dp_tf);
@@ -138,7 +148,9 @@ void get_mscan(U8 focus);
 void set_last_cos(U8 focus);
 U8 get_last_cos(U8 focus);
 U8 process_DFE(U8 focus, U8 keychr);
-void set_dfe(U8 focus, U8 bandsw, U8 k);
+void set_dfe(U8 focus, U8 bandsw, U8 curband);
+void ipl_cancel(void);
+U8 switch_band(U8 focus);
 
 //-----------------------------------------------------------------------------
 // init_lcd() initializes lcd resources
@@ -348,8 +360,12 @@ void update_lcd(U8 focus, U8 forced_focus){
 			mskpa(MAIN, 1);													// "skp" annunc = off
 		}
 //		mfreq(get_freq(MAIN), 0);											// Frequency display
-		if(ptt_change & PTT_KEYED) i = MAIN | VMODE_ISTX;
-		else i = MAIN;
+		if(ptt_change & PTT_KEYED){
+			i = MAIN | VMODE_ISTX;
+		}
+		else{
+			i = MAIN;
+		}
 		mfreq(get_freq(i), 0);							// update main freq display from vfo or vfotr
 	}else{
 		//**************************************
@@ -397,7 +413,7 @@ U8 process_MS(U8 mode){
 	U8	b;					// key beep counter
 	U8	i;					// temps
 	U8	j;
-	U8	k;
+	U8	k;					// band index
 	U8	l;
 	U8	m;
 	U32	ii;
@@ -419,6 +435,7 @@ U8 process_MS(U8 mode){
 		tsdisplay = 0;													// clear TS adj display mode
 		vfo_display = MAIN|SUB_D;										// force update of main/sub freq
 		ssubfl = MAIN;
+		xmodez |= IPL_BOOT;												// set bootflag
 	}else{
 		//**************************************
 		// process SIN changes
@@ -1198,23 +1215,43 @@ U8 process_MS(U8 mode){
 				if(!(xmodez & DFE_MODE)){
 					xmodez |= DFE_MODE;
 					dfe_vfo = 0;
-				}								// !- do not place a break here -!
+				}
+				if(band_focus){
+//					mset_500hz(2);
+					mdp2_blink(1);
+				}else{
+					sdp2_blink(1);
+				}
+				dfe_time(1);											// set/reset TO timer
+				// !- do not place a break here -!
 			case DOTchr:
 				if(xmodez & DFE_MODE){
 					b = process_DFE(band_focus, i);
 				}else{
 					b = 0;
 				}
+				if(i == DOTchr){
+					if(band_focus){
+						mdp2_blink(0);
+					}else{
+						sdp2_blink(0);
+					}
+				}
 				break;
 
 			case ENTchr:
+				if(band_focus){
+					mdp2_blink(0);
+				}else{
+					sdp2_blink(0);
+				}
 				if(xmodez & DFE_MODE){
 					if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
-						j = get_bandid(dfe_vfo / 1000L);
+						j = get_modulid(dfe_vfo / 1000L);
 						if(band_focus == MAIN){
-							m = get_bandid(get_vfo(MAIN) / 1000L);
+							m = get_modulid(get_vfo(MAIN) / 1000L);
 							if(j != m){
-								l = get_bandid(get_vfo(SUB) / 1000L);
+								l = get_modulid(get_vfo(SUB) / 1000L);
 								if(j == l){
 									// swap
 									set_swap_band();
@@ -1230,7 +1267,9 @@ U8 process_MS(U8 mode){
 									b = 2;
 								}else{
 									// call up new band (if installed)
-									b = 4;	// !!!
+									if(switch_band(band_focus)) b = 2;
+									// error
+									else b = 4;
 								}
 							}else{
 								// keep same band
@@ -1238,9 +1277,9 @@ U8 process_MS(U8 mode){
 								b = 2;
 							}
 						}else{
-							m = get_bandid(get_vfo(SUB) / 1000L);
+							m = get_modulid(get_vfo(SUB) / 1000L);
 							if(j != m){
-								l = get_bandid(get_vfo(MAIN) / 1000L);
+								l = get_modulid(get_vfo(MAIN) / 1000L);
 								if(j == l){
 									// swap
 									set_swap_band();
@@ -1256,7 +1295,9 @@ U8 process_MS(U8 mode){
 									b = 2;
 								}else{
 									// call up new band (if installed)
-									b = 4;	// !!!
+									if(switch_band(band_focus)) b = 2;
+									// error
+									else b = 4;
 								}
 							}else{
 								// keep same band
@@ -1275,6 +1316,13 @@ U8 process_MS(U8 mode){
 			default:
 				b = 0;	// no beeps
 				break;
+			}
+			if(b){
+				if(xmodez &IPL_BOOT){
+					ipl_cancel();
+//					xmodez &= ~IPL_BOOT;											// clear bootflag
+//					vfo_display |= MAIN | SUB_D;									// force vfo update on m/s
+				}
 			}
 			// process beeps
 			switch(b){
@@ -1299,8 +1347,76 @@ U8 process_MS(U8 mode){
 			}
 		}
 	}
+	// if DFE mode, intercept timeout
+	if((xmodez & DFE_MODE) && !dfe_time(0)){
+		// cancel dfe mode
+		process_DFE(band_focus, DOTchr);
+		// undo blink
+		if(band_focus){
+//			mset_500hz(0);
+			mdp2_blink(0);
+		}else{
+			sdp2_blink(0);
+		}
+		// set cancel beeps
+		do_3beep();
+	}
+	// check for IPL timeout
+	if(xmodez & IPL_BOOT){
+		if(!ipl_time(0)){
+			ipl_cancel();
+		}
+	}
 	return band_focus;
 }	// end process_MS()
+
+
+//-----------------------------------------------------------------------------
+// switch_band() performs band swap
+//	get bandid of new freq (or error)
+//	is band present (error if not)
+//	do the swap
+//	return BANDID or BANDOFF (error)
+//-----------------------------------------------------------------------------
+U8 switch_band(U8 focus){
+	U8	i;		// temps
+	U8	j;
+	U8	k;
+
+	i = get_modulid(dfe_vfo/1000L) - 1;			// calc bandid of dfe vfo
+	k = set_bit(i);								// convert to bitmap
+	j = get_present();							// get bandids present
+	// if the new vfo belongs to an installed band module, set up the swap
+	if(k & j){
+		// freq is valid and band is present
+		if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+			set_bandid(focus, i);
+			update_lcd(focus, focus);
+			if(focus == MAIN) j = MAIN_ALL;
+			else j = SUB_ALL;
+			update_radio_all(j);
+			force_push();						// force update to NVRAM
+			set_bandnv();
+			set_dfe(focus, 1, i);
+		}else{
+			i = BANDOFF;						// err
+		}
+	}else{
+		// not valid
+		i = BANDOFF;
+	}
+	return i;
+}
+
+//-----------------------------------------------------------------------------
+// ipl_cancel() clears IPL mode
+//-----------------------------------------------------------------------------
+void ipl_cancel(void){
+
+	xmodez &= ~IPL_BOOT;										// clear bootflag
+	vfo_display |= MAIN | SUB_D;								// force vfo update on m/s
+	return;
+}
 
 //-----------------------------------------------------------------------------
 // set_dfe() sets radio to dfe vfo
@@ -1308,15 +1424,15 @@ U8 process_MS(U8 mode){
 //	when jumping from mem to/fr call whereby the call freq ends up in the VFO.  Not sure if this
 //	is related to DFE... !!!
 //-----------------------------------------------------------------------------
-void set_dfe(U8 focus, U8 bandsw, U8 k){
+void set_dfe(U8 focus, U8 bandsw, U8 curband){
 	U8	i;		// temp
 
 	// if mem mode, turn off
-	i = xmode[k];
-	if(i & CALL_XFLAG) xmode[k] &= ~(MC_XFLAG);		// turn off call
+	i = xmode[curband];
+	if(i & CALL_XFLAG) xmode[curband] &= ~(MC_XFLAG); // turn off call
 	if(i & MEM_XFLAG){
-		mema(focus, 0);								// turn off "M"
-		xmode[k] &= ~MEM_XFLAG;
+		mema(focus, 0);						// turn off "M"
+		xmode[curband] &= ~MEM_XFLAG;
 	}
 	copy_2vfo(focus, dfe_vfo);
 	write_xmode(focus);
@@ -1365,6 +1481,7 @@ U8 process_DFE(U8 focus, U8 keychr){
 		d = keychr - '0';						// convert digit to numeral
 		dfe_vfo *= 10;							// slide new digit into temp
 		dfe_vfo += d;
+		if(dfe_vfo > MAX_VFO) dfe_vfo = 0;		// range limit
 		break;
 	}
 	if(focus == MAIN){							// trigger DU update
@@ -1485,11 +1602,11 @@ void process_VFODISP(U8 focus){
 
 			case DFE_DISP:
 				// direct freq entry VFO display
-				if(vfo_display & MAIN){
-					mfreq(dfe_vfo, 0);							// update main freq display from vfo or vfotr
-					vfo_display &= ~(VMODE_ISTX | MAIN);
-				}else{
-					if(vfo_display & SUB_D){
+				if(vfo_display & (MAIN|SUB_D)){
+					if(focus == MAIN){
+						mfreq(dfe_vfo, 0);							// update main freq display from vfo or vfotr
+						vfo_display &= ~(VMODE_ISTX | MAIN);
+					}else{
 						if(!(xmodeq & TEXTS_SLIDE)){
 							sfreq(dfe_vfo, 0);
 						}
@@ -1793,18 +1910,25 @@ U32 process_DIAL(U8 focus){
 	// process dial
 	j = is_mic_updn(0, focus, xmodeq) + get_dial(1);
 	if(j){
-		if((xmodeq & MSCANM_XFLAG) && (focus == MAIN)){
-			doscan(MAIN, 0);
-			set_slide(focus, 0);
-			return rflags;
-		}
-		if((xmodeq & MSCANS_XFLAG) && (focus == SUB)){
-			doscan(SUB, 0);
-			set_slide(focus, 0);
-			return rflags;
-		}
-		if(focus == SUB){
-			sub_time(1);								// reset timeout
+		if(xmodez & IPL_BOOT){
+			// cancel IPL mode
+			ipl_cancel();
+			j = 0;
+		}else{
+			// process dial & up/dn
+			if((xmodeq & MSCANM_XFLAG) && (focus == MAIN)){
+				doscan(MAIN, 0);
+				set_slide(focus, 0);
+				return rflags;
+			}
+			if((xmodeq & MSCANS_XFLAG) && (focus == SUB)){
+				doscan(SUB, 0);
+				set_slide(focus, 0);
+				return rflags;
+			}
+			if(focus == SUB){
+				sub_time(1);								// reset timeout
+			}
 		}
 	}
 //	if(xmodeq & (TONE_XFLAG|OFFS_XFLAG)){				// exception display for TONE or OFFS takes priority
@@ -2035,6 +2159,10 @@ void mfreq(U32 binfreq, U8 lzero){
 	U32	ii;
 	U32	jj;
 
+	if(xmodez & IPL_BOOT){
+		mputs_lcd("IC900F", 0);
+		return;
+	}
 	if(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT)){			// trap "off" and "off-line" error states
 		if(sys_err & NO_B_PRSNT){
 			// disp "----" (off-line)
@@ -2066,13 +2194,10 @@ void mfreq(U32 binfreq, U8 lzero){
 		lcd_buf[0] = (CS1_MASK|DA_CM_MASK) | 6;			// set data string preamble
 		put_spi(lcd_mfreq_1, CS_OPEN);					// send string to set display address and decode on
 		put_spi(lcd_buf, CS_IDLE);						// send BCD data
-		put_spi(lcd_mfreq_2, CS_CLOSE);					// set DP & close transaction
+		mdp(1);
 		//set/clear "1" GHz digit
-		lcd_buf[0] = CS1_MASK | 2;						// isolate GHz and enable or disable 1 GHz digit
-		lcd_buf[1] = LOAD_PTR | 0x1c;
-		if(ii == 0x1L) lcd_buf[2] = WR_DMEM | 0x05;
-		else lcd_buf[2] = WR_DMEM | 0x04;
-		put_spi(lcd_buf, CS_OPENCLOSE);
+		if(ii == 0x1L) mm6(1);
+		else mm6(0);
 	}
 	return;
 }	// end mfreq()
@@ -2087,6 +2212,10 @@ void sfreq(U32 binfreq, U8 lzero){
 	U32	ii;
 	U32	jj;
 
+	if(xmodez & IPL_BOOT){
+		sputs_lcd("KE0FF", 0);
+		return;
+	}
 	if(sys_err & (NO_B_PRSNT|NO_SUX_PRSNT)){										// trap "off" and "off-line" error states
 		if(sys_err & NO_B_PRSNT){
 			// disp "----" (off-line)
@@ -2119,16 +2248,136 @@ void sfreq(U32 binfreq, U8 lzero){
 		lcd_buf[0] = (CS2_MASK|DA_CM_MASK) | 6;			// set data string preamble
 		put_spi(lcd_sfreq_1, CS_OPEN);					// send string to set display address and decode on
 		put_spi(lcd_buf, CS_IDLE);						// send BCD data
-		put_spi(lcd_sfreq_2, CS_CLOSE);					// set DP & close transaction
+		sdp(1);
 		//set/clear "1" GHz digit
-		lcd_buf[0] = CS2_MASK | 2;						// isolate GHz and enable or disable 1 GHz digit
-		lcd_buf[1] = LOAD_PTR | 0x1a;
-		if(ii == 0x1L) lcd_buf[2] = WR_DMEM | 0x05;		// set 1G plus DP
-		else lcd_buf[2] = WR_DMEM | 0x04;				// just DP
-		put_spi(lcd_buf, CS_OPENCLOSE);
+		if(ii == 0x1L) sm6(1); 							// set 1G plus DP
+		else sm6(0); 									// just DP
 	}
 	return;
 }	// end sfreq()
+
+//-----------------------------------------------------------------------------
+// mm6() turns main M6 on (tf == TRUE) or off (tf == 0)
+//-----------------------------------------------------------------------------
+void mm6(U8 tf){
+
+	// set main dp
+	lcd_buf[0] = (CS1_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | MDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_DMEM | M6;				// set M6
+	else lcd_buf[2] = AND_DMEM | MDP2 | MDP;		// clear M6
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// sm6() turns sub M6 on (tf == TRUE) or off (tf == 0)
+//-----------------------------------------------------------------------------
+void sm6(U8 tf){
+
+	// set main dp
+	lcd_buf[0] = (CS2_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | SDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_DMEM | S6;				// set M6
+	else lcd_buf[2] = AND_DMEM | SDP2 | SDP;		// clear M6
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// mdp() turns main dp on (tf == TRUE) or off (tf == 0)
+//-----------------------------------------------------------------------------
+void mdp(U8 tf){
+
+	// set main dp
+	lcd_buf[0] = (CS1_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | MDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_DMEM | MDP;				// set DP blink
+	else lcd_buf[2] = AND_DMEM | MDP2 | M6;			// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// sdp() turns sub dp on (tf == TRUE) or off (tf == 0)
+//-----------------------------------------------------------------------------
+void sdp(U8 tf){
+
+	// set main dp
+	lcd_buf[0] = (CS2_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | SDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_DMEM | SDP;				// set DP blink
+	else lcd_buf[2] = AND_DMEM | SDP2 | S6;			// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// dp_blink() blinks (tf == TRUE) or un-blinks (tf == 0) main DP
+//-----------------------------------------------------------------------------
+void dp_blink(U8 tf){
+
+	// blink dp
+	lcd_buf[0] = (CS1_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | MDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_BMEM | MDP;				// set DP blink
+	else lcd_buf[2] = AND_BMEM | MDP2 | M6;			// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// mdp2_blink() blinks (tf == TRUE) or un-blinks (tf == 0) main DP2
+//-----------------------------------------------------------------------------
+void mdp2_blink(U8 tf){
+
+	// turn on dp2
+	lcd_buf[0] = (CS1_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | MDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_DMEM | MDP2;				// set DP
+	else lcd_buf[2] = AND_DMEM | MDP | M6;			// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	// blink dp2
+//	lcd_buf[1] = LOAD_PTR | MDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_BMEM | MDP2;				// set DP blink
+	else lcd_buf[2] = AND_BMEM | MDP | M6;			// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// sdp_blink() blinks (tf == TRUE) or un-blinks (tf == 0) main DP
+//-----------------------------------------------------------------------------
+void sdp_blink(U8 tf){
+
+	// blink dp
+	lcd_buf[0] = (CS2_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | SDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_BMEM | SDP;				// set DP blink
+	else lcd_buf[2] = AND_BMEM | SDP2;				// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// sdp2_blink() blinks (tf == TRUE) or un-blinks (tf == 0) main DP2
+//-----------------------------------------------------------------------------
+void sdp2_blink(U8 tf){
+
+	// turn on dp2
+	lcd_buf[0] = (CS2_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | SDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_DMEM | SDP2;				// set DP blink
+	else lcd_buf[2] = AND_DMEM | SDP;				// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	// blink dp2
+	lcd_buf[0] = (CS2_MASK | 0x02);					// set data string preamble
+	lcd_buf[1] = LOAD_PTR | SDP_ADDR;				// set lcd pointer
+	if(tf) lcd_buf[2] = OR_BMEM | SDP2;				// set DP blink
+	else lcd_buf[2] = AND_BMEM | SDP;				// clear DP
+	put_spi(lcd_buf, CS_OPENCLOSE);					// send string to set display address and blink
+	return;
+}
 
 //-----------------------------------------------------------------------------
 // sets the S-meter: srf = 0-7 or VOL/SQU: srf = 0-34 (with hi-bit set)
@@ -2381,8 +2630,8 @@ U8	mputs_lcd(char *s, U8 dp_tf){
 	}
 	put_spi(lcd_mraw, CS_OPEN);							// init for raw seg data
 	put_spi(lcd_buf, CS_IDLE);
-	if(dp_tf) put_spi(lcd_mfreq_2, CS_CLOSE);			// DP
-	else put_spi(lcd_mfreq_3, CS_CLOSE);				// no DP
+	if(dp_tf) mdp(1); //put_spi(lcd_mfreq_2, CS_CLOSE);			// DP
+	else mdp(0); //put_spi(lcd_mfreq_3, CS_CLOSE);				// no DP
 	return (i-1);
 }
 
@@ -2401,8 +2650,8 @@ U8	sputs_lcd(char *s, U8 dp_tf){
 	}
 	put_spi(lcd_sraw, CS_OPEN);							// init for raw seg data
 	put_spi(lcd_buf, CS_IDLE);
-	if(dp_tf) put_spi(lcd_sfreq_2, CS_CLOSE);			// DP
-	else put_spi(lcd_sfreq_3, CS_CLOSE);				// no DP
+	if(dp_tf) sdp(1); //put_spi(lcd_sfreq_2, CS_CLOSE);			// DP
+	else sdp(0); //put_spi(lcd_sfreq_3, CS_CLOSE);				// no DP
 	return (i-1);
 }
 
@@ -2929,8 +3178,16 @@ void add_bcds(U8* sptr, S8 adder, U8 addr, U8 max, U8 min){
 //-----------------------------------------------------------------------------
 void amtx(U8 tf){
 
-	if(tf) GPIO_PORTD_DATA_R &= ~MTX_N;
-	else GPIO_PORTD_DATA_R |= MTX_N;
+	if(tf){
+		GPIO_PORTD_DATA_R &= ~MTX_N;		// RX
+	}
+	else{
+		GPIO_PORTD_DATA_R |= MTX_N;			// TX
+		// process cancel IPL
+		if(xmodez & IPL_BOOT){
+			ipl_cancel();
+		}
+	}
 	return;
 }
 
@@ -2939,8 +3196,8 @@ void amtx(U8 tf){
 //-----------------------------------------------------------------------------
 void amrx(U8 tf){
 
-	if(tf) GPIO_PORTC_DATA_R &= ~MRX_N;
-	else GPIO_PORTC_DATA_R |= MRX_N;
+	if(tf) GPIO_PORTC_DATA_R &= ~MRX_N;		// SQ open
+	else GPIO_PORTC_DATA_R |= MRX_N;		// SQ closed
 	return;
 }
 
@@ -2949,8 +3206,8 @@ void amrx(U8 tf){
 //-----------------------------------------------------------------------------
 void asrx(U8 tf){
 
-	if(tf) GPIO_PORTC_DATA_R &= ~SRX_N;
-	else GPIO_PORTC_DATA_R |= SRX_N;
+	if(tf) GPIO_PORTC_DATA_R &= ~SRX_N;		// SQ open
+	else GPIO_PORTC_DATA_R |= SRX_N;		// SQ closed
 	return;
 }
 
@@ -3581,6 +3838,23 @@ U8 backl_adj(U8 setv){
 		set_pwm(6, brt_table2[setmem]);						// LCDBL
 	}
     return setmem;
+}
+
+//-----------------------------------------------------------------------------
+// xmodez_init() does IPL init of xmodez
+//-----------------------------------------------------------------------------
+void xmodez_init(void){
+
+	xmodez = IPL_BOOT;
+    return;
+}
+
+//-----------------------------------------------------------------------------
+// xmodez_stat() returns xmodez value
+//-----------------------------------------------------------------------------
+U8 xmodez_stat(void){
+
+    return xmodez;
 }
 
 // eof

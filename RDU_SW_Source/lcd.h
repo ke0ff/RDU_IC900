@@ -67,6 +67,7 @@
 
 // Xz-flags
 //#define	OFFS_XFLAG	0x
+#define	IPL_BOOT		0x10		// IPL boot in progress
 #define	DFE_MODE		0x20		// direct freq entry in progress
 #define	MSCANM1_XFLAG	0x40		// mem scan first active flags (M/S)
 #define	MSCANS1_XFLAG	0x80
@@ -155,6 +156,11 @@
 #define	M00_ADDR	0x09
 #define	M0_ADDR		0x0a
 
+#define	M6			0x01
+#define	MDP2		0x02
+#define	MDP			0x04
+#define	MDP_ADDR		0x1c
+
 #define	AOW			0x1
 #define	AOW_ADDR		0x1d
 #define	ALOW		0x2
@@ -185,6 +191,10 @@
 #define	S0_ADDR		0x08
 #define	S6			0x1
 #define	S6_ADDR		0x1a
+
+#define	SDP2		0x02
+#define	SDP			0x04
+#define	SDP_ADDR		0x1a
 
 #define	SSRF6		0x4
 #define	SSRF6_ADDR		0x1b
@@ -269,3 +279,5 @@ U8 mem2ordinal(char cm);
 char ordinal2mem(U8 memnum);
 U8 lookup_pl(U16 ctcss);
 U8 backl_adj(U8 setv);
+void xmodez_init(void);
+U8 xmodez_stat(void);

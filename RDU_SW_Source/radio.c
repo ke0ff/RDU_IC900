@@ -104,10 +104,12 @@ U8	ux129_rit_t;
 U8	vol_m;								// main vol
 U8	vol_s;								// sub vol
 
+// bandid is 0-5 values
 U8	bandid_m;							// bandid for main (index into above data structures)
 U8	bandid_s;							// bandid for sub (index into above data structures)
 
-U8	bandoff_m;							// band-off registers
+// moduleid is 1-6 values
+U8	bandoff_m;							// band-off trigger registers
 U8	bandoff_s;
 
 U32	vfot;								// temp vfo used for calculations and TX frequency
@@ -354,7 +356,7 @@ void init_radio(void){
 		}
 	}
 
-//		bandid_m = ID2M_IDX;	//!!! need to choose lowest 2 present modules
+//		 = ID2M_IDX;	//!!! need to choose lowest 2 present modules
 //		bandid_s = ID440_IDX;
 //	ux_present_flags = 0x3f; //!!! force all modules on for debug
 	i = 0;
@@ -402,7 +404,7 @@ void init_radio(void){
 //-----------------------------------------------------------------------------
 // process_SIN() processes SIN change flags
 //-----------------------------------------------------------------------------
-void  process_SIN(U8 cmd){
+void process_SIN(U8 cmd){
 	U32	sin_data;
 	U32	ii;				// temp
 	U32 tt;
@@ -417,6 +419,7 @@ void  process_SIN(U8 cmd){
 		lerr = 10L;
 		init_radio();									// init radio and data structures
 		ptt_mem = 0x10L;
+		xmodez_init();
 		return;
 	}													// normal (run) branch
 	if(got_sin()){
@@ -505,14 +508,14 @@ U8 process_SOUT(U8 cmd){
 		// no data is being sent branch ...
 		j = 0;
 		if(bandoff_m){																// turn-off band module flag trap, main
-			pll_buf[j++] = bandoff_m << 27;
+			pll_buf[j++] = (U32)bandoff_m << 27;
 			pll_ptr = 0;
 			bandoff_m = 0;															// clear signal flag
 			pll_buf[j] = 0xffffffffL;
 			k = 0xff;																// processing...
 		}
 		if(bandoff_s){																// turn-off band module flag trap, main
-			pll_buf[j++] = bandoff_s << 27;
+			pll_buf[j++] = (U32)bandoff_s << 27;
 			pll_ptr = 0;
 			bandoff_s = 0;															// clear signal flag
 			pll_buf[j] = 0xffffffffL;
@@ -540,7 +543,9 @@ U8 process_SOUT(U8 cmd){
 //					sprintf(dgbuf,"sinf: %08x",sin_flags); //!!!
 //					putsQ(dgbuf);
 				sin_flags &= ~SIN_SEND_F;											// clear the signal
-				pttsub_togg(vfo_p[bandid_m].bflags & PTTSUB_M);						// issue ptt/sub action toggle command
+				if(!(xmodez_stat() & IPL_BOOT)){
+					pttsub_togg(vfo_p[bandid_m].bflags & PTTSUB_M);					// issue ptt/sub action toggle command
+				}
 				k = 0xff;															// processing...
 			}else{
 				// process sout signals
@@ -904,7 +909,7 @@ void  recall_vfo(void){
 	for(i=0; i<LEN_ARY; i++){
 		crc = calcrc((vfo_p[i].tsa & 0x0f) | (vfo_p[i].tsb >> 4), crc);
 	}
-	i = bandid_m | (bandid_s << 4);			// combine bandid
+	i =  | (bandid_s << 4);			// combine bandid
 	crc = calcrc(i, crc);
 	crc = calcrc(ux129_xit, crc);			// save x/rit
 	crc = calcrc(ux129_rit, crc);
@@ -1315,7 +1320,7 @@ static U8	old_tx;
 */
 
 	if((!is_tx) && is_main) old_tx = 0;
-    band_idr = get_bandid(vfo_p[bid].vfo / 1000L);		// use vfo frequency to determine band ID
+    band_idr = get_modulid(vfo_p[bid].vfo / 1000L);		// use vfo frequency to determine band ID
     ux_noptt = band_idr << 27;							// align band ID in SOUT proto word
     if(is_main){
     	ux_noptt |= SOUT_MAIN | SOUT_PON;				// set module pre-amble bits (main)
@@ -1514,10 +1519,10 @@ static U8	old_tx;
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-// get_bandid() calculates band id (1-6) from input freq (MHz)
+// get_modulid() calculates band id (1-6) from input freq (MHz)
 //	and set wide-band bit if outside the ham RX limits
 //-----------------------------------------------------------------------------
-U8 get_bandid(U32 freqMM){
+U8 get_modulid(U32 freqMM){
     U8	j;
     U8	k;
     U8	i = BANDOFF;
@@ -2004,11 +2009,11 @@ U8 set_next_band(U8 focus){
 		if(focus == MAIN){									// j is focused band, k is other band
 			k = set_bit(bandid_s);							// get sub-band bitmap
 			j = set_bit(bandid_m);							// get main-band bitmap
-			bandoff_m = bandid_m + 1;
+			bandoff_m =  + 1;						// bandoff is a moduleid, so we add 1 to the bandid to align
 		}else{
 			j = set_bit(bandid_s);							// get sub-band bitmap
 			k = set_bit(bandid_m);							// get main-band bitmap
-			bandoff_s = bandid_s + 1;
+			bandoff_s = bandid_s + 1;						// bandoff is a moduleid, so we add 1 to the bandid to align
 		}
 		i = k | j;
 		if(ux_present_flags & (~i)){						// check to see if there are at least 3 modules present
