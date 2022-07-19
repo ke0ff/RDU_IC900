@@ -16,6 +16,6 @@
 //=============================================================================
 // public command fn declarations
 
-void dpl_cmd(char* obuf, U16* params, char ps);
+void dpl_cmd(char* obuf, U32* params, char ps);
 U32 dpl_calc(U16 dplcode);
 U8 cadd(U16 dplcode, U8 index);

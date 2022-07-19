@@ -17,17 +17,28 @@
  *    				 !!! Need to come up with a re-start sequence without power cycling if the BERR is resolved.
  *    				 !!! mem scan needs to disable string disp mode...
  *
- *    				 * SET loop: !!! performed with MFmic support -- no SET loop yet
- *    				 	- DIM brightness setting, LCD and button -- DIM/BRT added to MFmic as shifted mic buttons ("1" brt, "4" dim), with 10 settings
- *    				 	- BRT brightness setting, LCD and button
  *    				 * VFO Scan mode
  *    				 * XIT/RIT adjust (perhaps use VFOchr_H ???)
- *					!!! mutetimer (mute_time()) never gets set, only read.  !?!?!
+ *					 !!! mutetimer (mute_time()) never gets set, only read.  !?!?!
  *
  *    Project scope rev History:
- *    <VERSION 0.13>	Post-field trial mods
- *    07-13-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c, serial.h, radio.c/h
- *    				    re-worked hm_cmd_exec() to improve fault tolerance
+ *    <VERSION 0.13>	***>>>   Post-field trial mods   <<<***
+ *    07-18-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c, serial.h, radio.c/h
+ *    					Added RF status output message fn as part of the CAT system interface
+ *    					Reformatted the x_cmdfn() parsing definitions to improve the readability and maintainability of the command token lookup
+ *							list and enum{} definitions.  The result makes it much easier to change and add command tokens.
+ *						Added "F", "O", & "KEY" commands to cmd_fn().
+ *						Removed upcase from all of the cmd line input (may add back just upcase for cmd token ???).
+ *						Added stubs to radio.c for storing data into the vfo struct.
+ *						Added basic radio command set to cmd_fn.c.  Updated help files
+ *						Added NVALL CAT cmd to update nvram
+ *						Added hmkey (shft-C) to querry PTTSUB.  Added querry PTTSUB to PTTS command (querry is with only mid param entered)
+ *						!!! need to add send_stat() and related commands & link them to cmd_fn.c parser
+ *						!!! need signals to trigger status output messages for srf, discretes, op-freq, and offs.  SRF and discretes are system
+ *							driven, all others are triggered by operator input at keypad.  !!!need to finish "void send_stat(U8 focus, U8 type, char* sptr)"
+ *						!!! need to purge cmd_ln.c debug cmds (copy to archive).
+ *
+ *    07-15-22 jmh:		re-worked hm_cmd_exec() to improve fault tolerance
  *    				    changed BT_LN define to <CTRL-Z> to remove conflict with wired remote protocol - Fixes MHz button press issues
  *    				    changed SW_ESC define to <CTRL-Y> to prevent future conflicts with MFmic or other internal systems
  *    				    Added beeps to FUNC shift changes.  1-beep shift on, 2-beeps shift off, 3-beeps, unrecognized key shift off
@@ -40,6 +51,8 @@
  *    				    	each keypress.
  *    				    Added defines for process_ and timer signals
  *    				    Various function and formatting cleanups in radio.c
+ *    				 	SET loop has been deprecated (no plans to create one).  The "SET" key is now up for grabs.  Any ideas?
+ *    				 	LCD/LED DIM/BRT brightness setting -- DIM/BRT added to MFmic as shifted mic buttons ("1" brt, "4" dim), with 10 settings
  *    				    Implemented PTTSUB actions: none, smute toggle, sub-call toggle.  FUNC-D is config button, cycles through modes 0 - 3.
  *    				    	modes 0 (1-beep) is no-action, mode 1 (2 beeps) is smute, mode 2 (3-beeps) is sub-call, and mode 3 (4-beeps) is main-call
  *    				    	These features utilize a set of ersatz key codes to convey the desired actions to the processing code in lcd.c.  The "new"
@@ -52,9 +65,13 @@
  *							!!! need to validate new freq @RF
  *
  *    				    Had to "fix" DP/M6 handling in mfreq/sfreq to allow DP2 to be controlled
- *    				    !!! Seems to be an issue with mem/call/vfo transitions.  There is a combination of this sequence that leaves the call freq in the VFO.
- *    				    	see set_dfe() for notes.
+ *    				    Fixed an issue with mem/call/vfo transitions.  There is a combination of this sequence that leaves the call freq in the VFO.
+ *    				    	Had to refine how the system transistions between VFO, MEM, and CALL states.  This affected PTTSUB(MODE4) which required
+ *    				    	some changes to pttsub_togg().  Mode 4 (in-band call swap on TX) will toggle between VFO and the currently selected CALL
+ *    				    	channel or vis-a-vis. The only transition that is accommodated for memory modes is MEM == RX, CALL = TX.  If CALL == RX,
+ *    				    	swap is VFO = TX.  If VFO == RX, swap is CALL = TX.
  *    				    Added boot message to LCD.  Boot msg cancels after 5 sec (IPL_TIME) or any button press or PTT
+ *    				    Started work on IC900 Configurator in VisualC.  !!! Need to add ersatz key-press commands to cmd_fn.c
  *
  *    <VERSION 0.12>
  *    07-05-22 jmh:		MOD'd: main.c, init.h, cmd_fn.c/h lcd.c/h
@@ -386,6 +403,8 @@ U16		hmktimer;						// sub scan timer
 U16		hm_shft_timer;					// MFmic function-shift timeout timer
 U16		dfe_timer;						// dfe timeout timer
 U16		ipl_timer;						// ipl timeout timer
+U16		cato_timer;						// cat timeout timer
+U8		cata_timer;						// cat activity timer
 
 U32		free_32;						// free-running ms timer
 S8		err_led_stat;					// err led status
@@ -1570,6 +1589,32 @@ U8 shft_time(U8 tf){
 }
 
 //-----------------------------------------------------------------------------
+// cato_time() sets/reads the cat to timer
+//	(tf == 0 reads, 1 sets)
+//-----------------------------------------------------------------------------
+U8 cato_time(U8 tf){
+
+	if(tf == 1){
+		hm_shft_timer = CATO_TIME;
+	}
+	if(cato_timer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// cata_time() sets/reads the cat activity timer
+//	(tf == 0 reads, 1 sets)
+//-----------------------------------------------------------------------------
+U8 cata_time(U8 tf){
+
+	if(tf == 1){
+		hm_shft_timer = CATA_TIME;
+	}
+	if(cata_timer) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 // slide_time() sets/reads the text slide rate timer
 //	(tf == 0 reads, 1 sets, 0xff clears)
 //-----------------------------------------------------------------------------
@@ -2009,6 +2054,12 @@ static	U16	key_last;				// last key
 			}
 			if (ipl_timer != 0){							// update ipl timer
 				ipl_timer--;
+			}
+			if (cato_timer != 0){							// update cat to timer
+				cato_timer--;
+			}
+			if (cata_timer != 0){							// update cat act timer
+				cata_timer--;
 			}
 		}
 	}

@@ -71,7 +71,7 @@ U16	tone_list[] = {  670,  719,  744,  770,  797,  825,  854,  885,
 //					  18	19    1a    1b    1c    1d    1e    1f
 					1567, 1622, 1679, 1738, 1799, 1862, 1928, 2035,
 //					  20	21    22    23    24    25
-					2107, 2181, 2257, 2336, 2418, 2503 };
+					2107, 2181, 2257, 2336, 2418, 2503, 0xffff };
 
 // Mem ordinals         0         0123456789012345678901234
 char mem_ordinal[] = { "0123456789ABDEFGHJKLMNPRSTUWYZ()[]" };
@@ -80,6 +80,7 @@ char mem_ordinal[] = { "0123456789ABDEFGHJKLMNPRSTUWYZ()[]" };
 U8	lcd_buf[LCD_BUFLEN];			// LCD comm message buffer
 U8	maddr;							// mhz digit mode composite digit address and mode flags register
 U8	vfo_display;					// display update signal.  This is band (MAIN/SUB) to update or'd with 0x80 to trigger
+U8	uimode;							// Current DU mode, M/S
 U8	xmode[ID1200];					// xmode flags track mem/call modes
 U8	xmodeq;							// xmodeq tracks transient adjust modes (vol, squ, tone, offs)
 U8	xmodez;							// xmodez tracks first-scan enabled flags
@@ -111,7 +112,6 @@ void clear_lcd_buf(void);
 void alock(U8 tf);
 U32 bin32_bcdp(U32 bin32);
 void lamp_test(U8 tf);
-void update_lcd(U8 focus, U8 forced_focus);
 U8 process_MS(U8 cmd);
 void disp_duplex(U8 focus, U8 duplex);
 void process_VFODISP(U8 focus);
@@ -225,7 +225,6 @@ void process_UI(U8 cmd){
 	U8	i;					// temp
 	U8	mode_rtn;
 	static U8	sw_stat;	// sliding switches memory reg
-	static U8	mode;		// mode
 
 	//**************************************
 	// process IPL (Initial Program Load) init
@@ -233,7 +232,7 @@ void process_UI(U8 cmd){
 		GPIO_PORTD_DATA_R |= LOCK_SELECT;
 		wait(10);
 		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);				// force update of slide switch status
-		mode = MAIN_MODE;												// init process variables
+		uimode = MAIN_MODE;												// init process variables
 		chkmode = 0;
 		vfo_display = 0;
 		update_lcd(MAIN, MAIN);
@@ -247,28 +246,28 @@ void process_UI(U8 cmd){
 	}else{
 		//**************************************
 		// process the UI for each of the different modes:
-		switch(mode){
+		switch(uimode){
 		default:
-			mode = MAIN_MODE;											// fault trap... force mode to MAIN_MODE
+			uimode = MAIN_MODE;											// fault trap... force mode to MAIN_MODE
 		// MAIN/SUB "normal" process
 		case MAIN_MODE:
 		case SUB_MODE:
- 			mode_rtn = process_MS(mode);
+ 			mode_rtn = process_MS(uimode);
 			break;
 
 		// SET configuration loop process
 		case SET_MODE:
-//			mode_rtn = process_SET(mode);
+//			mode_rtn = process_SET(uimode);
 			break;
 
 		// Memory mode process
 //		case MEM_MODE:
-//			mode_rtn = process_MEM(mode);
+//			mode_rtn = process_MEM(uimode);
 //			break;
 		}
 		//**************************************
 		// update the display when there are mode changes
-		if(mode_rtn != mode){
+		if(mode_rtn != uimode){
 			switch(mode_rtn){
 			case MAIN_MODE:
 //				init_lcd_main();
@@ -286,7 +285,7 @@ void process_UI(U8 cmd){
 //				init_lcd_mem();
 //				break;
 			}
-			mode = mode_rtn;
+			uimode = mode_rtn;
 		}
 		//**************************************
 		// process slide switches (DIM and LOCK)
@@ -319,6 +318,8 @@ void process_UI(U8 cmd){
 
 //-----------------------------------------------------------------------------
 // update_lcd() forces update of LCD values
+//	focus = current focus (maintained in uimode)
+//	forced_focus = focus of band to be updated
 //-----------------------------------------------------------------------------
 void update_lcd(U8 focus, U8 forced_focus){
 	U8	i;
@@ -1094,21 +1095,27 @@ U8 process_MS(U8 mode){
 
 			case MRchr:													// Mem-mode toggle: this toggles between mem and vfo mode
 				// if mem mode, turn off
-				if(xmode[k] & CALL_XFLAG) xmode[k] &= ~(MC_XFLAG);		// turn off call, force M on
-				if(xmode[k] & MEM_XFLAG){
+//				if(xmode[k] & CALL_XFLAG) xmode[k] &= ~(MC_XFLAG);		// turn off call, force M on
+				if((xmode[k] & MC_XFLAG) == MEM_XFLAG){					// if mem mode, turn off and go to VFO
 					mema(band_focus, 0);								// turn off "M"
-					xmode[k] &= ~MEM_XFLAG;
-					if((xmode[k] & (MC_XFLAG)) == 0){
+					xmode[k] &= ~MC_XFLAG;								// turn off mem/call mode
+//					if((xmode[k] & (MC_XFLAG)) == 0){
 						copy_temp2vfo(band_focus);
-					}
+//					}
 				}else{
-					if((xmode[k] & (MC_XFLAG)) == 0){					// copy vfo to temp
+					if((xmode[k] & (MC_XFLAG)) == 0){					// if not call mode, copy vfo to temp
 						copy_vfo2temp(band_focus);
 					}
 					mema(band_focus, 1);								// turn on "M"
 					mskpa(band_focus, get_scanmem(band_focus));			// update "skp" annunc.
 					xmode[k] |= MEM_XFLAG;
+					xmode[k] &= ~CALL_XFLAG;
 					read_mem(band_focus, get_memnum(band_focus, 0));
+				}
+				if(band_focus == MAIN){
+					iflags |= SIN_MSRF_F;								// force update of MSRF
+				}else{
+					iflags |= SIN_SSRF_F;								// force update of SSRF
 				}
 				write_xmode(band_focus);
 				update_lcd(band_focus, band_focus);
@@ -1117,17 +1124,18 @@ U8 process_MS(U8 mode){
 				update_radio_all(i);
 				break;
 
+				// CALL/MR/VFO operation:
+				//		  __________________________________
+				//       v                                  v
+				//		[MEM]  <==s/r==> [VFO] <==s/r==>  [CALL]		s/r = save VFO moving to CALL/MEM, restore VFO moving from CALL/MEM
+				//		 ^                                  ^				No VFO save/restore moving between CALL and MEM
+				//		 |__________________________________|
+				//
+
 			case CALLchr:												// call-mode toggle: this toggles between call mode
-				if(xmode[k] & CALL_XFLAG){
-					// call mode going off...
-					xmode[k] &= ~CALL_XFLAG;							// turn off call mode
-					if(xmode[k] & MEM_XFLAG){							// if mem active, go to mem mode..
-						mema(band_focus, 1);							// turn on "M" indicator
-						read_mem(band_focus, get_memnum(band_focus, 0));
-					}
-					if((xmode[k] & (MC_XFLAG)) == 0){
-						copy_temp2vfo(band_focus);						// if no mem mode, recall VFO
-					}
+				if((xmode[k] & MC_XFLAG) == CALL_XFLAG){				// if call mode...
+					xmode[k] &= ~MC_XFLAG;								// turn off mem/call mode
+					copy_temp2vfo(band_focus);							// recall VFO
 				}else{
 					// call mode coming on...
 					mema(band_focus, 0);								// turn off "M" indicator
@@ -1135,6 +1143,7 @@ U8 process_MS(U8 mode){
 						copy_vfo2temp(band_focus);
 					}
 					xmode[k] |= CALL_XFLAG;								// turn on call mode
+					xmode[k] &= ~MEM_XFLAG;								// turn on call mode
 					read_mem(band_focus, get_callnum(band_focus, 0));	// recall VFO state
 				}
 				if(band_focus == MAIN){
@@ -3768,6 +3777,15 @@ U8 lookup_pl(U16 ctcss){
 }
 
 //-----------------------------------------------------------------------------
+// pl_lookup() returns U16 CTCSS frequency given the U8 tone#.
+//	last tone in array returns 0xffff
+//-----------------------------------------------------------------------------
+U16 pl_lookup(U8 code){
+
+	return tone_list[code];
+}
+
+//-----------------------------------------------------------------------------
 // set_last_cos() stores bid and mem# in next location of last_cosx[] array.
 //-----------------------------------------------------------------------------
 void set_last_cos(U8 focus){
@@ -3855,6 +3873,31 @@ void xmodez_init(void){
 U8 xmodez_stat(void){
 
     return xmodez;
+}
+
+//-----------------------------------------------------------------------------
+// xmode_stat() returns xmode value for m/s
+//-----------------------------------------------------------------------------
+U8 xmode_stat(U8 focus){
+
+    return xmode[get_band_index(focus)];
+}
+
+//-----------------------------------------------------------------------------
+// query_tx() returns true if TX led is on
+//-----------------------------------------------------------------------------
+U8 query_tx(void){
+
+	if(GPIO_PORTD_DATA_R & MTX_N) return TRUE;
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// query_mode() returns true if TX led is on
+//-----------------------------------------------------------------------------
+U8 query_mode(void){
+
+	return uimode;
 }
 
 // eof

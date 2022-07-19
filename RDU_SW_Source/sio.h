@@ -61,11 +61,13 @@
 #define SIN_BUSY	0x20000000L	// module selected feedback
 #define SIN_SQSA	0x10000000L	// main COS
 #define SIN_SQSB	0x08000000L	// sub COS
+#define	SIN_SQSB_bp	27
 #define SIN_SRFA	0x07800000L	// mask (main)
 #define SIN_SRFB	0x00780000L	// mask (sub)
 #define SIN0_DATA	(SIN_BUSY|SIN_SQSA|SIN_SQSB|SIN_SRFA|SIN_SRFB)	// mask
 // SIN_ADDR = 1
 #define SIN_SEND	0x20000000L	// /PTT active
+#define SIN_SEND_bp	29
 #define SIN_DSQA	0x10000000L	// "1" = tone detected
 #define SIN_DSQB	0x08000000L
 #define SIN_MCK		0x04000000L	// MIC u/d button pressed

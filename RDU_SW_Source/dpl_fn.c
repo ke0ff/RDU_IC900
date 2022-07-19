@@ -68,7 +68,7 @@ U8	pnot[DPL_RBITS] = { 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0 };
 //	in cmd line), the command lists the 112 Connect Systems codes to the
 //	terminal.
 //=============================================================================
-void dpl_cmd(char* obuf, U16* params, char ps){
+void dpl_cmd(char* obuf, U32* params, char ps){
 
 	U8		i;				// temp
 	U16		k;				// U16 temp

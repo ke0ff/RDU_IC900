@@ -10,16 +10,17 @@
  *  
  *******************************************************************/
 
+// generally required includes
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <math.h>
-//#include <intrins.h>
-#include "inc/tm4c123gh6pm.h"
 #include "typedef.h"
-#include "init.h"						// App-specific SFR Definitions
 
+// application-specific includes
+#include "inc/tm4c123gh6pm.h"
+#include "init.h"						// App-specific SFR Definitions
 #include "cmd_fn.h"						// fn protos, bit defines, rtn codes, etc.
 #include "dpl_fn.h"						// dpl extension cmd/support.
 #include "serial.h"
@@ -33,9 +34,123 @@
 #include "radio.h"
 #include "uxpll.h"
 
+//===================================================================================================
+// Command token syntax defines and instantiations.
+//
+// This is the define list for the command line tokens used in this CLI.  Each "CMD" define is a quoted string that
+//	corresponds to the minimum typed command line token.  The "ENUM" define sets the token used in the parsing
+//	switch.  The "CMD" defines are entered into an array of arrays with a terminating array of 0xff, eg:
+//		char* cmd_list[] = { CMD_1, CMD_2, ... , "\xff" };
+//	The "ENUM" defines are likewise entered into an "enum" statement, eg:
+//		enum cmd_enum{ ENUM_1, ENUM_2, ... , ENUM_LAST };
+//	The primary requirement is for the subscript numbers for the "CMD" and "ENUM" must be in matching order.
+//		The list order of the CMD/ENUM defines establishes the search order.  Lower-indexed (left-most) items are
+//		searched first.  This means that the least-ambiguous items should be included earlier in the list to prevent
+//		situations whereby a command of "BT" is entered, but matches on "B" in the list because it was the first
+//		encountered.  So, for this example, "BT" should be first in the
+//
+// cmd_type is adjusted to the number of tokens in the list:
+
+#define	cmd_type	char	// define as char for list < 255, else define as int
+
+#define	CMD_1		"~"				// hm-133 wired remote command ID
+#define	ENUM_1		hm_cmd
+#define	CMD_2		"bt"			// Bluetooth debug command
+#define	ENUM_2		bttest
+#define	CMD_3		"b"				// beeper debug
+#define	ENUM_3		beeper
+#define	CMD_31		"help"			// Alternate help syntax
+#define	ENUM_31		help2
+#define	CMD_32		"hi"			// hi/lo power debug
+#define	ENUM_32		hilo
+#define	CMD_4		"h"				// HM-133 data debug
+#define	ENUM_4		hm_data
+#define	CMD_41		"key"			// HM-133 key signal
+#define	ENUM_41		set_hmkey
+#define	CMD_5		"k"				// KPU debug data
+#define	ENUM_5		kp_data
+#define	CMD_6		"at"
+#define	ENUM_6		tst_att
+#define	CMD_7		"as"
+#define	ENUM_7		tst_asc
+#define	CMD_8		"a"
+#define	ENUM_8		adc_tst
+#define	CMD_81		"dup"
+#define	ENUM_81		dup
+#define	CMD_9		"d"
+#define	ENUM_9		dis_la
+#define	CMD_10		"l"
+#define	ENUM_10		list_la
+#define	CMD_101		"o"
+#define	ENUM_101	set_offset
+#define	CMD_102		"ptts"
+#define	ENUM_102	pttsub
+#define	CMD_11		"p"
+#define	ENUM_11		tst_pwm
+#define	CMD_12		"e"
+#define	ENUM_12		tst_enc
+#define	CMD_13		"frq"
+#define	ENUM_13		tst_freq
+#define	CMD_131		"f"
+#define	ENUM_131	set_freq
+#define	CMD_14		"info"
+#define	ENUM_14		info
+#define	CMD_15		"mstr"
+#define	ENUM_15		mstr
+#define	CMD_160		"nvall"
+#define	ENUM_160	setnvall
+#define	CMD_16		"nr"
+#define	ENUM_16		nvrd
+#define	CMD_17		"nw"
+#define	ENUM_17		nvwr
+#define	CMD_18		"nc"
+#define	ENUM_18		nvcmd
+#define	CMD_19		"u"
+#define	ENUM_19		tstuart1
+#define	CMD_20		"scan"
+#define	ENUM_20		scan_cmd
+#define	CMD_21		"sto"			// store memory data
+#define	ENUM_21		sto_mem
+#define	CMD_210		"s"				// squelch
+#define	ENUM_210	squc
+#define	CMD_211		"to"
+#define	ENUM_211	tone
+#define	CMD_212		"tsa"
+#define	ENUM_212	tsac
+#define	CMD_213		"tsb"
+#define	ENUM_213	tsbc
+#define	CMD_22		"ti"
+#define	ENUM_22		timer_tst
+#define	CMD_23		"t"
+#define	ENUM_23		trig_la
+#define	CMD_24		"?"				// help list
+#define	ENUM_24		help1
+#define	CMD_26		"vers"			// version info
+#define	ENUM_26		vers
+#define	CMD_27		"v"			// version info
+#define	ENUM_27		volc
+#define	ENUM_LAST	lastcmd
+
+
+char* cmd_list[] = { CMD_1, CMD_2, CMD_3, CMD_31, CMD_32, CMD_4, CMD_41, CMD_5, CMD_6, CMD_7, CMD_8, CMD_81, CMD_9, CMD_10, CMD_101, CMD_102, CMD_11, \
+				     CMD_12, CMD_13, CMD_131, CMD_14, CMD_15, CMD_160, CMD_16, CMD_17, CMD_18, CMD_19, CMD_20, CMD_21, CMD_210, CMD_211, CMD_212, CMD_213, \
+				     CMD_22, CMD_23, CMD_24, CMD_26, CMD_27, "\xff" };
+
+enum       cmd_enum{ ENUM_1, ENUM_2, ENUM_3, ENUM_31, ENUM_32, ENUM_4, ENUM_41, ENUM_5, ENUM_6, ENUM_7, ENUM_8, ENUM_81, ENUM_9, ENUM_10, ENUM_101, ENUM_102, ENUM_11, \
+	   	   	   	   	 ENUM_12, ENUM_13, ENUM_131, ENUM_14, ENUM_15, ENUM_160, ENUM_16, ENUM_17, ENUM_18, ENUM_19, ENUM_20, ENUM_21, ENUM_210, ENUM_211, ENUM_212, ENUM_213, \
+					 ENUM_22, ENUM_23, ENUM_24, ENUM_26, ENUM_27, ENUM_LAST };
+
+// enum error message ID
+enum err_enum{ no_response, no_device, target_timeout };
+
+//===================================================================================================
+
 //=============================================================================
 // local registers
 
+#define MAX_PRESP_BUF 80
+char bcmd_resp_buf[MAX_PRESP_BUF + 10];
+char* bcmd_resp_ptr;
 U16	device_eprom_start;					// device parameter regs
 U16	device_eprom_end;
 U16	device_eeprom_start;
@@ -49,30 +164,12 @@ S8	boot_len_fixed;
 U16	device_max_bootlen;
 U16	device_pprog;
 char device_valid;
-#define MAX_PRESP_BUF 80
-char bcmd_resp_buf[MAX_PRESP_BUF + 10];
-char* bcmd_resp_ptr;
 // HM-133 MFmic support
 U8	hm_buf[HM_BUFF_END];				// signal buffer
 U8	hm_hptr;
 U8	hm_tptr;
 U8	shftm;								// fn-shift mem register (MFmic)
 
-// enum error message ID
-enum err_enum{ no_response, no_device, target_timeout };
-
-// enum list of command numerics
-//	each enum corresponds to a command from the above list (lastcmd corresponds
-//	with the last entry, 0xff)
-//                                                            1     1     1   1   1  1   1     1    1   2  2  2  2  2  2
-//                        0  1   2  3  4  5   6   7  8  9  0  1     2     3   4   5  6   7     8    9   0  1  2  3  4  5
-const char cmd_list[] = {"~\0BT\0B\0H\0K\0AT\0AS\0A\0D\0L\0P\0E\0F\0INFO\0MSTR\0NR\0NW\0NC\0U\0SCAN\0STO\0TI\0T\0?\0H\0VERS\0\xff"};
-//             0      1      2      3       4       5       6       7       8      9       10      11      12       13   14   15   16   17    18       19,      20
-enum cmd_enum{ hm_cmd,bttest,beeper,hm_data,kp_data,tst_att,tst_asc,adc_tst,dis_la,list_la,tst_pwm,tst_enc,tst_freq,info,mstr,nvrd,nvwr,nvcmd,tstuart1,scan_cmd,sto_mem,
-//             21        22      23    24    25
-			   timer_tst,trig_la,help1,help2,vers,lastcmd,helpcmd };
-
-#define	cmd_type	char	// define as char for list < 255, else define as int
 
 // test init messages
 U8	lcd_test_01a[] = { 0x41, 0xe0 };				// CS1
@@ -126,9 +223,9 @@ U8	lcd_init_L4[] = { 0x82, 0xfb, 0x14 };
 U8	lcd_init_L5[] = { 0xa1, 0x00 };
 U8	lcd_init_L6[] = { 0x82, 0xfd, 0xb0 };
 
-//				   0123456789012345
-const char un_ary[] = { "RDU-900,ke0ff\0\0\0" };					// init User SN string
-const char teststr[] = { "THIS IS KE0FF " };							// test string
+//				          0123456789012345
+const char un_ary[] =  { "RDU-900,ke0ff\0\0\0" };			// init User SN string
+const char teststr[] = { "THIS IS KE0FF " };				// test string
 
 char	band_str[6][5] = {
 		{"10m \0"},
@@ -143,7 +240,7 @@ char	band_str[6][5] = {
 // local Fn declarations
 
 void get_BCD32(char *sptr, U32 *bcdval);
-U8 get_Dargs(U8 argsrt, U8 nargs, char* args[ARG_MAX], U16 params[ARG_MAX]);
+U8 get_Dargs(U8 argsrt, U8 nargs, char* args[ARG_MAX], U32 params[ARG_MAX]);
 cmd_type cmd_srch(char* string);
 char do_cmd_help(U8 cmd_id);
 char parm_srch(U8 nargs, char* args[ARG_MAX], char* parm_str);
@@ -167,10 +264,53 @@ void hm_sto(U8 j);
 
 //=============================================================================
 // CLI cmd processor entry point
-//	Uses number of args (nargs) and arg pointer array (args[]) to lookup
-//	command and execute.
-//	offset is srecord offset value which is maintianed in main() and passed
-//	forward to srecord functions (upload)
+//	Somewhere in the application, there must be a constant polling for input characters or end of
+//		line signal.  The goal is to produce a command line array that was terminated by an EOL
+//		(ASCII 0x0d).  This array is passed through parse_args() before calling x_cmdfn().  The
+//		base command line array and the args arrays are maintained elsewhere in the application
+//		(usually in main.c).
+//	Uses number of args (nargs) and arg pointer array (args[]) to lookup command and dispatch to
+//		a command-specific code code block for execution.
+//
+//	offset is srecord offset value which is maintained in main() and passed
+//	forward for the srecord functions (upload), if used.
+//
+//	Note that the original command line array is "chopped up" by parse_args() by replacing
+//		whitespace characters with null-terminators (unless brackets by quotes, as described below).
+//
+//	"Switch" operands, such as "-C", are processed here.  These switches set flags and are then
+//		removed from the parameter arrays, so that the subsequent command code doesn't have to
+//		try and filter them out.  If a switch is included in a parameter field for a command that
+//		does not interpret it, the switch flag is simply ignored.
+//
+//	get_Dargs() (get decimal args) converts ASCII numbers into integer values and is called from
+//		each individual parser so that "no-parameter-entered" defaults can be established.  To
+//		enforce these defaults, first initialize the params[] array with the default values, then
+//		call get_Dargs().
+//
+//	whitespace() defines what ASCII characters are white-space parameter separators used to separate
+//		parameters within the command line array.  Multiple, consecutive whitespaces are allowed and
+//		are filtered out by parse_args().
+//	quotespace() defines what ASCII characters are to be used as quotes inside the parameter field.
+//		Quotes allow character strings which contain whitespace to be contained within a single
+//		arg[] array.  Quotes effectively suspend whitespace delimiting within quote pairs.
+//		The system doesn't differentiate opening or closing quotes.  As long as it is defined in
+//		quotespace(), any character can be used to open and close a quoted parameter string.
+//			e.g.: if a double (") and single (') quote character are defined in quotespace(),
+//			any of the following are valid quoted strings:
+//				"Now is the time on schprockets when we dance'
+//				'No monkeys allowed!"
+//				"Go for launch"
+//
+//	Parameter ordinal management is specified by the command-specific parser code blocks and Fns.
+//		Generally, a fixed order is easiest to manage.  Non-entered values in a list of 2 or more
+//		parameters are indicated by a "-" character.  Negation of decimal values must also be
+//		addressed in the cmd-specific code.  Other management schemes are possible but would be
+//		up to the cmd-specific code to execute.
+//
+//		Parametric switches ("-x" in the command line) do not have any ordinal requirements nor can
+//		any be enforced under the current architecture.
+//
 //=============================================================================
 
 int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
@@ -180,13 +320,15 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 	char	obuf[OBUF_LEN];			// gp output buffer
 //	char	abuf[30];				// temp string buffer
 //	char	bbuf[6];				// temp string buffer
-	U16		params[ARG_MAX];		// holding array for numeric params
+	U32		params[ARG_MAX];		// holding array for numeric params
 	char	c;						// char temp
 	char	d;						// char temp
+//	char	pm = FALSE;				// M flag, MAIN (set if "-M" found in args)
+	char	ps = FALSE;				// S flag, SUB (set if "-S" found in args)
 	char	pc = FALSE;				// C flag (set if "-C" found in args)
 	char	pw = FALSE;				// W flag (set if "-W" found in args)
 	char	px = FALSE;				// X flag (set if "-X" found in args)
-	char	ps = FALSE;				// s flag (set if <wsp>-S<wsp> found in args)
+//	char	ps = FALSE;				// s flag (set if <wsp>-S<wsp> found in args)
 	char	pv = FALSE;				// V flag (set if <wsp>-V<wsp> found in args)
 	char	pr = FALSE;				// R flag (set if <wsp>-R<wsp> found in args)
 	int		cmd_found = TRUE;		// default to true, set to false if no valid cmd identified
@@ -225,14 +367,10 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 	bchar = '\0';																// clear global escape
     if (nargs > 0){
     	if((args[0][0] != '~')){
-    		for(i = 0; i <= nargs; i++){											//upcase all args
-    			s = args[i];
-    			str_toupper(s);
-    		}
-/*    	}else{
-    		if(args[0][2] == 'r'){
-    			putsQ(";");
-    		}*/
+//    		for(i = 0; i <= nargs; i++){										//upcase all args !!! might just upcase command token ???
+//    			s = args[i];
+//    			str_toupper(s);
+//    		}
     	}
 		t = args[0];															// point to first arg (cmd)
 		cmd_id = cmd_srch(t);													// search for command
@@ -248,37 +386,45 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 				do_cmd_help(cmd_id);											// do help for cmd only
 			}
 		}else{
-			c = parm_srch(nargs, args, "-S");									// capture minus floater
+			c = parm_srch(nargs, args, "-s");									// capture sub floater
 			if(c){
 				ps = TRUE;
 				nargs--;
 			}
-			c = parm_srch(nargs, args, "-V");									// capture v-flag floater
+/*			c = parm_srch(nargs, args, "-m");									// capture main floater
+			if(c){
+				pm = TRUE;
+				nargs--;
+			}*/
+			c = parm_srch(nargs, args, "-v");									// capture v-flag floater (verbose)
 			if(c){
 				pv = TRUE;
 				nargs--;
 			}
-			c = parm_srch(nargs, args, "-C");									// capture c-flag floater
+			c = parm_srch(nargs, args, "-c");									// capture c-flag floater
 			if(c){
 				pc = TRUE;
 				nargs--;
 			}
-			c = parm_srch(nargs, args, "-W");									// capture w-flag floater
+			c = parm_srch(nargs, args, "-w");									// capture w-flag floater
 			if(c){
 				pw = TRUE;
 				nargs--;
 			}
-			c = parm_srch(nargs, args, "-X");									// capture x-flag select floater
+			c = parm_srch(nargs, args, "-x");									// capture x-flag select floater
 			if(c){
 				px = TRUE;
 				nargs--;
 			}
-			c = parm_srch(nargs, args, "-R");									// capture x-flag select floater
+			c = parm_srch(nargs, args, "-r");									// capture x-flag select floater
 			if(c){
 				pr = TRUE;
 				nargs--;
 			}
 			gas_gage(2);														// init gas gauge to disabled state
+
+// ====== PARSING SWITCH ==========================================================================================================================================
+
 			switch(cmd_id){														// dispatch command
 				case help1:
 				case help2:														// MAIN HELP
@@ -309,32 +455,147 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					dispSWvers();
 					break;
 
-				case bttest:
-					putsQ("BTtst");
-/*					if(gotmsgn()){
-						getss(obuf);
-						putssQ("{");
-						putsQ(obuf);
-						putssQ("}");
-					}*/
-					putss(args[1]);
-//					putssQ(args[1]);
-//					wait(1100);
-//					putss("\r");
-/*					do{
-						if(gotmsgn(0)){
-							putsQ(get_btptr());
-							clr_btptr();
-							gotmsgn(1);
+				case set_hmkey:
+					// send HM-133 MFmic key signal
+					//	KEY <key-chr>
+					c = args[1][0];
+					hm_map(c, 'p');					// send press
+					hm_map(c, 'r');					// send release
+					putsQ("#OK$");
+					break;
+
+				case set_freq:
+					// set module frequency in hz
+					//	F freq
+					//	Finds module associated with freq or err if no match
+					params[0] = 0;
+					get_Dargs(1, nargs, args, params);
+					i = get_modulid(params[0] / 1000000L);
+					if(i != BANDOFF){
+						set_vfo(params[0]/1000L, i-1);
+						vfo_change(MAIN);
+						vfo_change(SUB);
+						upd_lcd(i);
+						putsQ("#OK$");
+					}else{
+						putsQ("#ERR$");
+					}
+					break;
+
+				case set_offset:
+					// set module offset in hz
+					//	O freq mid
+					// !!! need to validate frequency before storing to VFO
+					params[0] = 0;
+					params[1] = 0;
+					get_Dargs(1, nargs, args, params);
+					i = (U8)params[1] - 1;
+					if(i <= ID1200_IDX){
+						set_offs2(params[0]/1000L, i);
+						vfo_change(MAIN);
+						vfo_change(SUB);
+						putsQ("#OK$");
+					}else{
+						putsQ("#ERR$");
+					}
+					break;
+																				// str = "VFO + OFFS + DPLX/pwr/skip + CTCSS + SQ + VOL + XIT + RIT + BID-1 + !MEM_NAME! + STR_CHKS"
+																				// if STR_CHKS omitted or is incorrect, an error is reported, but the cmd line processes anyway
+																				// STO 3 A XX "1296000 20000 nn 103.5 34 34 -7 +7 5 !1234567890123456!"
+																				// 1234567890123456789012345678901234567890123456789012345678901234567890
+																				//          1         2         3         4         5         6         7
+				case sto_mem:													// store mem: p[0] = band, p[1] = mem#, p[2] = chks, a[4] = mem_param_string
+					params[0] = 0;								// band#		// STO <bnum> <mchr> <chks> "str"
+					params[2] = 0;								// checks		//
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					s = args[4];								// upcase string to be sure
+					str_toupper(s);
+					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
+					if(--params[0] > 5) params[1] = NUM_MEMS;
+					if(params[1] < NUM_MEMS){
+//						ii = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR; // band/mem#
+//						sscanf(args[3],"%d %d %c %f", &ii, &hh, &c, &fa);
+//																		frq  ofs  dplx/pwr/skp  pl   sq            vol           xit           rit           bid           namestr
+						sscanf(args[4],"%d %d %d %f %d %d %d %d %d %s", &ii, &hh, &mem_buf8[0], &fa, &mem_buf8[2], &mem_buf8[3], &mem_buf8[4], &mem_buf8[5], &mem_buf8[6], gp_buf);
+						l = (U8)mem_buf8[0];
+						k = (U16)(fa * 10.0);
+
+						kk = (U16)str_chks(args[4]);
+						t = char_srch(args[4], '!') + 1;
+						*char_srch(t, '!') = '\0';
+						if(pv){								// if verbose...
+							sprintf(obuf,"STOMEM: %s; mem#: %c; name: '%s'", band_str[params[0]], ordinal2mem(params[1]), t);
+							putsQ(obuf);
+							sprintf(obuf,"  FREQ: %d", ii);
+							putsQ(obuf);
+							sprintf(obuf,"  OFFS: %d", hh);
+							putsQ(obuf);
+							switch(l & DPLX_MASK){
+							case DPLX_S:
+								d = 'S';
+								break;
+
+							case DPLX_P:
+								d = 'P';
+								break;
+
+							case DPLX_M:
+								d = 'M';
+								break;
+							}
+							sprintf(obuf,"  DPLX: %c", d);
+							putsQ(obuf);
+							if(l & LOHI_F) putsQ("   PWR: LOW");
+							else putsQ("   PWR: HI");
+							sprintf(obuf," CTCSS: %d  %02x", k, lookup_pl(k)+1);
+							putsQ(obuf);
+							sprintf(obuf,"    SQ: %d", mem_buf8[2]);
+							putsQ(obuf);
+							sprintf(obuf,"   VOL: %d", mem_buf8[3]);
+							putsQ(obuf);
+							sprintf(obuf,"   XIT: %d", mem_buf8[4]);
+							putsQ(obuf);
+							sprintf(obuf,"   RIT: %d", mem_buf8[5]);
+							putsQ(obuf);
+							sprintf(obuf,"  B_ID: %d", mem_buf8[6]);
+							putsQ(obuf);
+							if(!(l & SCANEN_F)) putsQ("  SKIP: ON");
+							else putsQ("  SKIP: off");
 						}
-					}while(bchar != ESC);*/
-//					putss("---\r");
+						if(params[2] != kk){									// checks test
+							sprintf(obuf,"#ERRCHKS = %d$", kk);
+							putsQ(obuf);
+						}else{
+							kk = get_memaddr((U8)params[0], (U8)params[1]);
+							rw32_nvr(kk, ii, CS_WRITE|CS_OPEN);						// write freq
+							rw16_nvr(kk, (U16)hh, CS_WRITE);						// write offs
+							rw8_nvr(kk, (U8)mem_buf8[0], CS_WRITE);					// duplex/pwr/skip
+							rw8_nvr(kk, lookup_pl(k)+1, CS_WRITE);					// PL tone code
+							rw8_nvr(kk, (U8)mem_buf8[2], CS_WRITE);					// sq
+							rw8_nvr(kk, 0, CS_WRITE);								// vol deprecated (vfo_p[band].vol now a spare) //
+							rw8_nvr(kk, (U8)mem_buf8[4], CS_WRITE);					// xit
+							rw8_nvr(kk, (U8)mem_buf8[5], CS_WRITE);					// rit
+							rw8_nvr(kk, (U8)mem_buf8[6], CS_WRITE|CS_CLOSE);					// bid
+							kk = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR;			// band/mem#
+							j = CS_WRITE | CS_OPEN;											// namestr
+							for(i=0; i<MEM_NAME_LEN; i++){
+								if(i == (MEM_NAME_LEN - 1)) j = CS_WRITE | CS_CLOSE;
+								rw8_nvr(kk, *t++, j);
+								j = CS_WRITE;
+							}
+							putsQ("#OK$");
+						}
+					}else{
+						putsQ("#ERR$");
+					}
 					break;
 
 				case mstr:														// mem string: p[0] = band+1, p[1] = mem#, p[2] = string
 					params[0] = 0;
 					params[1] = 0;
 					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					s = args[3];												// upcase string to be sure
+					str_toupper(s);
 					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
 					if(--params[0] > 5) params[1] = NUM_MEMS;
 					if(params[1] < NUM_MEMS){
@@ -363,91 +624,231 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						putsQ("!Error!");
 					}
 					break;
-																				// str = "VFO + OFFS + DPLX/pwr/skip + CTCSS + SQ + VOL + XIT + RIT + BID-1 + !MEM_NAME! + STR_CHKS"
-																				// if STR_CHKS omitted or is incorrect, an error is reported, but the cmd line processes anyway
-																				// STO 3 A XX "1296000 20000 nn 103.5 34 34 -7 +7 5 !1234567890123456!"
-																				// 1234567890123456789012345678901234567890123456789012345678901234567890
-																				//          1         2         3         4         5         6         7
-				case sto_mem:													// store mem: p[0] = band, p[1] = mem#, p[2] = chks, a[4] = mem_param_string
-					params[0] = 0;								// band#		// STO <bnum> <mchr> <chks> "str"
-					params[2] = 0;								// checks		//
+
+				case tone:														// tone: p[0] = mid, p[1] = tone freq, p[2] = on/off
+					params[0] = 0;
+					params[3] = 1;
 					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
-					params[1] = mem2ordinal(args[2][0]);						// convert mem chr to mem#
-					if(--params[0] > 5) params[1] = NUM_MEMS;
-					if(params[1] < NUM_MEMS){
-//						ii = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR; // band/mem#
-//						sscanf(args[3],"%d %d %c %f", &ii, &hh, &c, &fa);
-//																		frq  ofs  dplx/pwr/skp  pl   sq            vol           xit           rit           bid           namestr
-						sscanf(args[4],"%d %d %d %f %d %d %d %d %d %s", &ii, &hh, &mem_buf8[0], &fa, &mem_buf8[2], &mem_buf8[3], &mem_buf8[4], &mem_buf8[5], &mem_buf8[6], gp_buf);
-						l = (U8)mem_buf8[0];
-						k = (U16)(fa * 10.0);
-
-						kk = (U16)str_chks(args[4]);
-						t = char_srch(args[4], '!') + 1;
-						*char_srch(t, '!') = '\0';
-						sprintf(obuf,"STOMEM: %s; mem#: %c; name: '%s'", band_str[params[0]], ordinal2mem(params[1]), t);
-						putsQ(obuf);
-						sprintf(obuf,"  FREQ: %d", ii);
-						putsQ(obuf);
-						sprintf(obuf,"  OFFS: %d", hh);
-						putsQ(obuf);
-						switch(l & DPLX_MASK){
-						case DPLX_S:
-							d = 'S';
-							break;
-
-						case DPLX_P:
-							d = 'P';
-							break;
-
-						case DPLX_M:
-							d = 'M';
-							break;
-						}
-						sprintf(obuf,"  DPLX: %c", d);
-						putsQ(obuf);
-						if(l & LOHI_F) putsQ("   PWR: LOW");
-						else putsQ("   PWR: HI");
-						sprintf(obuf," CTCSS: %d  %02x", k, lookup_pl(k)+1);
-						putsQ(obuf);
-						sprintf(obuf,"    SQ: %d", mem_buf8[2]);
-						putsQ(obuf);
-						sprintf(obuf,"   VOL: %d", mem_buf8[3]);
-						putsQ(obuf);
-						sprintf(obuf,"   XIT: %d", mem_buf8[4]);
-						putsQ(obuf);
-						sprintf(obuf,"   RIT: %d", mem_buf8[5]);
-						putsQ(obuf);
-						sprintf(obuf,"  B_ID: %d", mem_buf8[6]);
-						putsQ(obuf);
-						if(!(l & SCANEN_F)) putsQ("  SKIP: ON");
-						else putsQ("  SKIP: off");
-						if(params[2] != kk){									// checks test
-							sprintf(obuf,"CHKS error = %d", kk);
-							putsQ(obuf);
-						}else{
-							kk = get_memaddr((U8)params[0], (U8)params[1]);
-							rw32_nvr(kk, ii, CS_WRITE|CS_OPEN);						// write freq
-							rw16_nvr(kk, (U16)hh, CS_WRITE);						// write offs
-							rw8_nvr(kk, (U8)mem_buf8[0], CS_WRITE);					// duplex/pwr/skip
-							rw8_nvr(kk, lookup_pl(k)+1, CS_WRITE);					// PL tone code
-							rw8_nvr(kk, (U8)mem_buf8[2], CS_WRITE);					// sq
-							rw8_nvr(kk, 0, CS_WRITE);								// vol deprecated (vfo_p[band].vol now a spare) //
-							rw8_nvr(kk, (U8)mem_buf8[4], CS_WRITE);					// xit
-							rw8_nvr(kk, (U8)mem_buf8[5], CS_WRITE);					// rit
-							rw8_nvr(kk, (U8)mem_buf8[6], CS_WRITE|CS_CLOSE);					// bid
-							kk = get_memaddr((U8)params[0], (U8)params[1]) + MEM_STR_ADDR;			// band/mem#
-							j = CS_WRITE | CS_OPEN;											// namestr
-							for(i=0; i<MEM_NAME_LEN; i++){
-								if(i == (MEM_NAME_LEN - 1)) j = CS_WRITE | CS_CLOSE;
-								rw8_nvr(kk, *t++, j);
-								j = CS_WRITE;
-							}
-						}
+					sscanf(args[2],"%f",&fa);									// get float of tone freq
+					if( fa > 300.0) fa = 0;										// default to zero if invalid tone
+					k = (U16)(fa * 10.0);
+					i = (U8)params[0] - 1;
+					// search for tone code
+					j = lookup_pl(k);
+					if((i <= ID1200_IDX) && (j != 0xff)){
+						// store code
+						set_ctcss(j, i);
+						vfo_change(MAIN);
+						vfo_change(SUB);
+						upd_lcd(i);
+						putsQ("#OK$");
 					}else{
-						putsQ("!Band/Mem# Error!");
+						putsQ("#ERR$");
 					}
 					break;
+
+				case dup:														// duplex: p[0] = mid, p[1] = "+", "-", or "S"
+					params[0] = 0;
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					i = (U8)params[0] - 1;
+			    	switch(args[2][0]){
+			    	case '+':
+			    		j = DPLX_P;
+			    		break;
+
+			    	case '-':
+			    		j = DPLX_M;
+			    		break;
+
+			    	case 'S':
+			    	case 's':
+			    		j = 0;
+			    		break;
+
+			    	default:
+			    		j = 0xff;
+			    		break;
+			    	}
+					if((i <= ID1200_IDX) && (j != 0xff)){
+						set_dplx(j, i);
+						vfo_change(MAIN);
+						vfo_change(SUB);
+						upd_lcd(i);
+						putsQ("#OK$");
+					}else{
+						putsQ("#ERR$");
+					}
+					break;
+
+				case hilo:														// hilo: p[0] = mid, p[1] = "h", "l", "1", or "0"
+					params[0] = 0;
+					get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+					i = (U8)params[0] - 1;
+			    	switch(args[2][0]){
+			    	case 'h':
+			    	case 'H':
+			    	case '1':
+			    		j = 0;
+			    		break;
+
+			    	case 'l':
+			    	case 'L':
+			    	case '0':
+			    		j = LOHI_F;
+			    		break;
+
+			    	default:
+			    		j = 0xff;
+			    		break;
+			    	}
+					if((i <= ID1200_IDX) && (j != 0xff)){
+						set_lohi(j, i);
+						vfo_change(MAIN);
+						vfo_change(SUB);
+						upd_lcd(i);
+						putsQ("#OK$");
+					}else{
+						putsQ("#ERR$");
+					}
+					break;
+
+					case volc:														// vol: p[0] = mid, p[1] = vol
+						params[0] = 99;
+						params[1] = 99;
+						get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+						i = (U8)params[0] - 1;
+						j = params[1];
+						if((i <= ID1200_IDX) && (j <= LEVEL_MAX)){
+							// store code
+							set_vol(j, i);
+							force_push();
+							putsQ("#OK$");
+						}else{
+							putsQ("#ERR$");
+						}
+						break;
+
+					case squc:														// squ: p[0] = mid, p[1] = squ
+						params[0] = 99;
+						params[1] = 99;
+						get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+						i = (U8)params[0] - 1;
+						j = params[1];
+						if((i <= ID1200_IDX) && (j <= LEVEL_MAX)){
+							// store code
+							set_squ(j, i);
+							force_push();
+							putsQ("#OK$");
+						}else{
+							putsQ("#ERR$");
+						}
+						break;
+
+					case tsac:														// tsa: p[0] = mid, p[1] = ts value
+						params[0] = 99;
+						params[1] = 99;
+						get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+						i = (U8)params[0] - 1;
+						j = params[1] / TS_PER;
+						if((i <= ID1200_IDX) && (j <= TS_MAX)){
+							// store code
+							set_tsa(j, i);
+//							force_push();
+							putsQ("#OK$");
+						}else{
+							putsQ("#ERR$");
+						}
+						break;
+
+					case tsbc:														// tsb: p[0] = mid, p[1] = ts value
+						params[0] = 99;
+						params[1] = 99;
+						get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+						i = (U8)params[0] - 1;
+						j = params[1] / TS_PER;
+						if((i <= ID1200_IDX) && (j <= TS_MAX)){
+							// store code
+							set_tsb(j, i);
+//							force_push();
+							putsQ("#OK$");
+						}else{
+							putsQ("#ERR$");
+						}
+						break;
+
+// pttsub (bflags)
+//	PTTSUB_SMUT	0x40						// ptt-sub edge action mode bits and field mask
+//	PTTSUB_CALL	0x80
+//	PTTSUB_M	(PTTSUB_SMUT | PTTSUB_CALL)
+//	PTTSUB_MOD0	0
+//	PTTSUB_MOD1	PTTSUB_SMUT
+//	PTTSUB_MOD2	PTTSUB_CALL
+//	PTTSUB_MOD3	(PTTSUB_SMUT | PTTSUB_CALL)
+//					U8  get_bflag(U8 focus, U8 cmd, U8 bfset){
+
+					case pttsub:													// pttsub: p[0] = mid, p[1] = 1-4, none, smute, scall, mcall
+						params[0] = 99;
+						params[1] = 99;
+						get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+						i = (U8)params[0] - 1;
+				    	switch(params[1]){
+				    	case 1:
+				    		j = PTTSUB_MOD0;
+				    		break;
+
+				    	case 2:
+				    		j = PTTSUB_MOD1;
+				    		break;
+
+				    	case 3:
+				    		j = PTTSUB_MOD2;
+				    		break;
+
+				    	case 4:
+				    		j = PTTSUB_MOD3;
+				    		break;
+
+				    	default:
+				    		j = 0xff;
+				    		break;
+				    	}
+						if((i <= ID1200_IDX) && (j != 0xff)){
+							set_pttsub(j, i);
+							vfo_change(MAIN);
+							vfo_change(SUB);
+							putsQ("#OK$");
+						}else{
+							if((params[1] == 99) && (i <= ID1200_IDX)){							// if set params == default, querry PTTSUB
+								//	send pttsub querry response
+			  	  				// bflags hold the pttsub action status.  read the current bflags
+			  	  				i = set_pttsub(0xff, i);
+			  	  				j = ((i & PTTSUB_M) >> PTTSUB_bs) + 1;
+			  	  				sprintf(gp_buf,"#OK %d$",j);
+			  	  				putsQ(gp_buf);
+							}else{
+								putsQ("#ERR$");
+							}
+						}
+						break;
+
+					case setnvall:													// update NVRAM
+						params[0] = ID10M_IDX + 1;
+						params[1] = ID1200_IDX + 1;
+						get_Dargs(1, nargs, args, params);							// parse param numerics into params[] array
+						params[0] -= 1;												// convert mids to bids
+						params[1] -= 1;
+						if((params[0] <= ID1200_IDX) && (params[1] <= ID1200_IDX)){
+							nvwr_vfo((U8)params[0], (U8)params[1]+1);
+							set_bandnv();
+							set_vnv(MAIN);
+							set_vnv(SUB);
+							putsQ("#OK$");
+						}else{
+							putsQ("#ERR$");
+						}
+						break;
+
+// ==  DEBUG Fns FOLLOW +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
 
 				case beeper:													// beeper test
 					putsQ("beep\n");
@@ -458,6 +859,25 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 						set_beep(params[1], (U16)(((U32)params[1] * 75L)/1000L));
 					}
 					do_beep(params[0]);
+//					send_stat(MAIN, gp_buf);
+//					putsQ(gp_buf);
+//					put_status(U8 focus, char* sptr, U8 sid)
+					put_vfo(0x86, obuf, 0);
+					putsQ(obuf);
+					put_vfo(0x82, obuf, 0);
+					putsQ(obuf);
+					put_vfo(1, obuf, 1);
+					putsQ(obuf);
+					put_vfo(0, obuf, 1);
+					putsQ(obuf);
+					put_vfo(1, obuf, 2);
+					putsQ(obuf);
+					put_vfo(0, obuf, 2);
+					putsQ(obuf);
+					put_vfo(1, obuf, 3);
+					putsQ(obuf);
+					put_vfo(0, obuf, 3);
+					putsQ(obuf);
 					break;
 
 				case scan_cmd:
@@ -695,46 +1115,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 								break;
 						}
 					}
-//					do{
-//					}while(pw && (bchar != ESC));
 					break;
-
-/*				case tst_tempa:
-					i = 0;														// default resolution = 0.5C
-					if(*args[1]){												// 0 = 0.5, 1 = 0.25, 2 = 0.125, 3 = 0.0625
-						i = (*args[1]) & 0x03;
-					}
-					k = (75 << i) + 75;											// tmeas(max) = 75 * 2^i (ms)
-					i <<= 5;
-//					I2C_Send2(ADDR_TSENS0, PTR_CONFIG, i);
-//					I2C_Send1(ADDR_TSENS0, PTR_TSENSE);
-					putsQ("tsense ambient:");
-					disp_esc(pw);												// display "press esc to exit" if pw is true
-					wait(k);													// wait for 1st measurement to be ready
-					do{
-//						k = I2C_Recv2(ADDR_TSENS0);								// get temp sense data
-						switch(i){
-						default:
-						case 0:
-							sprintf(obuf,"%.1f C",temp_float(k));
-							break;
-
-						case 0x20:
-							sprintf(obuf,"%.2f C",temp_float(k));
-							break;
-
-						case 0x40:
-							sprintf(obuf,"%.3f C",temp_float(k));
-							break;
-
-						case 0x60:
-							sprintf(obuf,"%.4f C",temp_float(k));
-							break;
-						}
-						putsQ(obuf);
-						wait(500);
-					}while(pw && (bchar != ESC));
-					break;*/
 
 				case tst_asc:
 					putsQ("Test asc7:");
@@ -850,40 +1231,6 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					}
 					break;
 
-/*				case log_data:													// log data to com port
-					// display log data:  F ?/t ms per sample (1000 default)
-					// log continuous if "W" param included
-					j = 0;
-					k = 0;
-					do{
-						if(j == 0){
-							putsQ("SAMP#, FAN Rps, TA, TH, TJ, IM, PF, PR");	// put up banner every 50 lines
-							j = 50;
-						}
-						j -= 1;
-						k += 1;
-						ii = 0;
-						fa = 30.0 * (float)SYSCLK / (float)ii;
-						sprintf(obuf,"%u, %.0f,",k, fa);						// samp#, fan rps
-						putsQ(obuf);
-						fa = get_temp(0, i);
-						sprintf(obuf," %.4f,",fa);								// TA
-						putsQ(obuf);
-						fa = get_temp(1, i);
-						sprintf(obuf," %.4f,",fa);								// TH
-						putsQ(obuf);
-//						ip = adc_buf;
-//						i = adc_in(ip);
-						//	TJ = (-75 * ((rawADC * 3.3 / 4096) - 2.7)) - 55
-						fa = -75.0 * ((adc_buf[7]) * 3.3 / 4096.0);
-						fa += 147.5;
-						sprintf(obuf," %.4f,",fa);								// TJ
-						putsQ(obuf);
-						sprintf(obuf," %u, %u, %u",adc_buf[1],adc_buf[3],adc_buf[5]);	// IM, PF, PF as raw unsigned
-						putsQ(obuf);
-						waitpio(1000);											// wait with process update
-					}while(pw && (bchar != ESC));
-					break;*/
 
 				case tst_enc:													// pwr-off (sleep)
 #ifdef DEBUG
@@ -898,43 +1245,6 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							sj = si;
 						}
 					}while(bchar != ESC);
-
-/*					//	read position of enc 2 (SW encoder)
-					putsQ("ENC Debug:");
-					k = QEI0_POS_R;
-					kk = QEI1_POS_R;
-					do{
-						d = get_key();
-						if(d){
-							sprintf(obuf,"%c",d);
-							putsQ(obuf);
-						}
-						//	read position:
-						//	x = QEI0_POS_R;
-						hh = QEI0_POS_R;
-						if(hh != k){
-							sprintf(obuf,"ENC0: %04x, DIR: %1x",QEI0_POS_R,QEI0_STAT_R & QEI_STAT_DIRECTION);
-							putsQ(obuf);
-							k = hh;
-						}
-						hh = QEI1_POS_R;
-						if(hh != kk){
-							sprintf(obuf,"ENC1: %04x, DIR: %1x",QEI1_POS_R,QEI1_STAT_R & QEI_STAT_DIRECTION);
-							putsQ(obuf);
-							kk = hh;
-						}
-						//	rot dir:
-						//	dir = QEI0_STAT_R | QEI_STAT_DIRECTION; // 0 = fwd, 1 = reverse
-						//	dir = QEI0_STAT_R | QEI_STAT_ERROR; // 0 = OK, 1 = error in gray code
-						if(get_encstat2(1)){
-							sprintf(obuf,"ENC2: %04x",get_pos2());
-							putsQ(obuf);
-						}
-						if(get_encstat3(1)){
-							sprintf(obuf,"ENC3: %04x",get_pos3());
-							putsQ(obuf);
-						}
-					}while(bchar != ESC);*/
 #endif
 					break;
 
@@ -972,7 +1282,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 #endif
 					break;
 #define	deelay	5
-				case trig_la:												// LCD debug trigger
+				case trig_la:													// LCD debug trigger
 #ifdef DEBUG
 					putsQ("LCD CMD line (ESC to exit)...\n");
 					bchar = 0;
@@ -1156,85 +1466,6 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 							break;
 						}
 					}while(bchar != ESC);
-
-
-/*					get_Dargs(1, nargs, args, params);			// parse param numerics into params[] array
-					reset_lcd();											// reset the LCD chipset
-					wait2(deelay);
-					put_spi(lcd_init_00,3);									// send captured init data
-					wait2(deelay);
-					put_spi(lcd_init_00b,3);
-					wait2(deelay);
-
-					put_spi(lcd_init_tst0,1);
-					wait2(deelay);
-					dbuf[0] = 0x61;
-					dbuf[1] = (U8)params[0];
-					put_spi(dbuf,2);
-					wait2(deelay);
-
-					put_spi(lcd_init_01,3);
-					wait2(deelay);
-					put_spi(lcd_init_02,3);
-					wait2(deelay);
-					put_spi(lcd_init_03,1);
-					put_spi(lcd_init_04,0);
-					put_spi(lcd_init_05,2);
-					wait2(deelay);
-					put_spi(lcd_init_06,1);
-					put_spi(lcd_init_07,2);
-					wait2(deelay);
-					put_spi(lcd_init_06,1);
-					put_spi(lcd_init_07,2);
-					wait2(deelay);
-					put_spi(lcd_init_08,3);
-					wait2(deelay);
-					put_spi(lcd_init_09,3);
-					wait2(deelay);
-					put_spi(lcd_init_10,3);
-					wait2(deelay);
-					put_spi(lcd_init_11,1);
-					put_spi(lcd_init_12,2);
-					wait2(deelay);
-					put_spi(lcd_init_13,3);
-					wait2(deelay);
-					put_spi(lcd_init_14,3);
-					wait2(deelay);
-					put_spi(lcd_init_15,3);
-					wait2(deelay);
-					put_spi(lcd_init_16,3);
-					wait2(deelay);
-					put_spi(lcd_init_17,3);
-					wait2(deelay);
-					put_spi(lcd_init_18,3);
-					wait2(deelay);
-					put_spi(lcd_init_19,1);
-					put_spi(lcd_init_20,2);
-					wait2(deelay);
-					put_spi(lcd_init_21,3);
-					wait2(deelay);
-					put_spi(lcd_init_21b,3);
-					wait2(deelay);
-//					put_spi(lcd_init_22,3);
-//					wait2(deelay);
-//					put_spi(lcd_init_23,3);
-//					wait2(deelay);
-					sprintf(obuf,"LCD ON. <esc> to exit...");
-					putsQ(obuf);
-					do{
-						put_spi(lcd_init_L1,1);
-						wait2(deelay);
-						put_spi(lcd_init_L2,0);
-						wait2(deelay);
-						put_spi(lcd_init_L3,2);
-						wait2(deelay);
-						put_spi(lcd_init_L4,1);
-						wait2(deelay);
-						put_spi(lcd_init_L5,0);
-						wait2(deelay);
-						put_spi(lcd_init_L6,2);
-						wait2(deelay);
-					}while(bchar != ESC);		*/							// repeat until ESC
 					sprintf(obuf,"Done.\n");
 					putsQ(obuf);
 #endif
@@ -1267,40 +1498,36 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 					if(jj == 3){
 						GPIO_PORTD_DATA_R |= MTX_N;
 					}
-
-/*					sprintf(obuf,"DispOpr.\n");
-					putsQ(obuf);
-
-//					U8	lcd_init_tst0[] = { 0x42, 0xe0, 0xd4 };
-//					U8	lcd_init_tst1[] = { 0x61, 1 };				// data
-
-					if(params[0] > 31){
-						dbuf[0] = 0x41;
-						dbuf[2] = 0xd4;
-						put_spi(dbuf,1);
-						wait2(deelay);
-						dbuf[0] = 0x61;
-						dbuf[1] = (U8)params[1];
-						put_spi(dbuf,3);
-						wait2(deelay);
-					}else{
-						dbuf[0] = 0x42;
-						dbuf[1] = 0xe0 | ((U8)params[0] & 0x0f);
-						dbuf[2] = 0xd4;
-						put_spi(dbuf,1);
-						wait2(deelay);
-						dbuf[0] = 0x61;
-						dbuf[1] = (U8)params[1];
-						put_spi(dbuf,3);
-						wait2(deelay);
-					}*/
 					break;
 
 				default:
 				case lastcmd:													// not valid cmd
 					cmd_found = FALSE;
 					break;
-			}
+
+
+				case bttest:
+					putsQ("BTtst");
+/*					if(gotmsgn()){
+						getss(obuf);
+						putssQ("{");
+						putsQ(obuf);
+						putssQ("}");
+					}*/
+					putss(args[1]);
+//					putssQ(args[1]);
+//					wait(1100);
+//					putss("\r");
+/*					do{
+						if(gotmsgn(0)){
+							putsQ(get_btptr());
+							clr_btptr();
+							gotmsgn(1);
+						}
+					}while(bchar != ESC);*/
+//					putss("---\r");
+					break;
+			} //=========== END PARSING SWITCH ======================================================================================
 		}
     }
 	if(bchar == ESC) while(gotchrQ()) getchrQ();									// if ESC, clear CLI input chrs
@@ -1319,12 +1546,13 @@ void do_help(void){
 	putsQ("selectively entering <args>, use \"-\" for <args> that keep default value.");
 	putsQ("\"=\" must precede decimal values w/o spaces. Floating <args>: these non-number");
 	putsQ("<args> can appear anywhere in <arg> list: \"W\" = wait for operator\n");
-	putsQ("\tAdc test\t\tpgmr software VERSion");
-	putsQ("\tH: disp HM-151 data\tK: disp keypad data");
-	putsQ("\tUart1 test\t\tEncoder display");
-	putsQ("\tPwm test\t\tLog data");
-	putsQ("\tTImer test (toggles PC4 @200ms period)");
-	putsQ("\tT: temp ambient (W to loop)");
+	putsQ("\tFreq set\tofp VERSion");
+	putsQ("\tset Offset\trmt KEY input");
+	putsQ("\tSTOre memory\tTONE set tone code");
+	putsQ("\tDUP Duplex\tHIlo RF power");
+	putsQ("\tVol set\t\tSqu set");
+	putsQ("\tTSA set\t\tTSB set");
+	putsQ("\tPTTSub action\tNVALL saves vfo struct");
 	putsQ("Supports baud rates of 115.2, 57.6, 38.4, 19.2, and 9.6 kb.  Press <Enter>");
 	putsQ("as first character after reset at the desired baud rate.");
 }
@@ -1333,56 +1561,184 @@ void do_help(void){
 // do_cmd_help() displays individual cmd help using cmd_id enum
 //=============================================================================
 char do_cmd_help(U8 cmd_id){
+	char 	c = TRUE;	// temps
+	U16		k;
+	U8		i;
+	char	hbuf[10];
 
-	char c = TRUE;
-	
 	switch(cmd_id){														// dispatch help line
+		case set_hmkey:
+			putsQ("KEY <chr> ?");
+			putsQ("\tRemote keypress.  <ch> is single chr ID:");
+			putsQ("\t'L' MHz   'T' Call  'X' M/S swap");
+			putsQ("\t'/' UP    'V' V/M   'M' H/L pwr");
+			putsQ("\t'\\' DN    'F' SUB   'G' SHFT");
+			putsQ("\tTX: '0-9', 'A-D', '*', '#' = DTMF, !! NOP if issued during TX !!");
+			putsQ("\tRX: '0-9' = DFE, '*' = DFE cancel, '#' DFE enter");
+			putsQ("\t    'A'=CHK  'B'=TONE  'C'=BAND  'D'=SMUTE");
+			putsQ("");
+			putsQ("\tFUNC/Shifted Keys:");
+			putsQ("\t'p' SHFT  'o' SET   'n' SUB");
+			putsQ("\t'k'       'm' MW    'l'");
+			putsQ("\t'j'");
+			putsQ("\t'a' BRT   'b'       'c' Qup   'q' Vup");
+			putsQ("\t'd' DIM   'e'       'f' Qdn   'r' Vdn");
+			putsQ("\t'g'       'h' DUP   'i'       's' PTT sub querry");
+			putsQ("\t'+' TS    '`' T     '$'       't' PTT sub mode++");
+			break;
 
-		case hm_data:													// set ant stop
+/*			code char fnkey_code[] = { 'p',   'o',   'n',   'k',   'm',   'l',   'j',  '|',
+								  '!',   'a',   'b',   'c',   'q',   'd',   'e',   'f',
+								  'r',   'g',   'h',   'i',   's',   '+',   '`',   '$',
+								  't',   '\0' };
+			// Normal mode keycodes for HM-151 and HM-133 (see above for HM-133 notes)
+			code char   key_code[] = { 'L',   'T',   'X',   '/',   'V',   'M',   '\\',  'F',
+								  'G',   '1',   '2',   '3',   'A',   '4',   '5',   '6',
+								  'B',   '7',   '8',   '9',   'C',   '*',   '0',   '#',
+								  'D',   '\0' };*/
+
+		case set_freq:
+			putsQ("F <frq Hz> ?");
+			putsQ("\tSet freq (Hz).  Sets VFO in corresponding band module.");
+			putsQ("\tERR if <frq> not in range of any module.");
+			break;
+
+		case set_offset:
+			putsQ("O <frq Hz> <mid>?");
+			putsQ("\tSet Offs freq (Hz) <bid> = 1 for UX-19 up to 6 for UX-129");
+			break;
+
+		case sto_mem:													// store mem: p[0] = band, p[1] = mem#, p[2] = chks, a[4] = mem_param_string
+			putsQ("STO <mid> <mchr> <chks> 'str' ?");
+			putsQ("\tStore mem, <mid> is module ID (Ux19 = 1, UX-129 = 6),");
+			putsQ("\t<mchr> = the mem# chr ID, <chks> = checksum of 'str' ");
+			putsQ("\t       Valid = AlphaNum & ( ) [ ] !! EXCEPT C, I, O, Q !!");
+			putsQ("\t'str' = 'VFO + OFFS + DPLX/pwr/skip + CTCSS + SQ + VOL + XIT + RIT +");
+			putsQ("\tBID + !MEM_NAME!");
+			putsQ("\t\tVFO/OFFS = KHz");
+			putsQ("\t\tDPLX/pwr/skip = bitmap");
+			putsQ("\t\tCTCSS = bitmap");
+			putsQ("\t\tSQ/VOL = 0-34");
+			putsQ("\t\tXIT/RIT = bitmap");
+			putsQ("\t\tBID = <mid>-1");
+			putsQ("\t\t!MEM_NAME! = mem name str (15 bytes max)");
+			break;
+			// str = "VFO + OFFS + DPLX/pwr/skip + CTCSS + SQ + VOL + XIT + RIT + BID-1 + !MEM_NAME! + STR_CHKS"
+			// if STR_CHKS omitted or is incorrect, an error is reported, but the cmd line processes anyway
+			// STO 3 A XX "1296000 20000 nn 103.5 34 34 -7 +7 5 !1234567890123456!"
+			// 1234567890123456789012345678901234567890123456789012345678901234567890
+			//          1         2         3         4         5         6         7
+			// store mem: p[0] = band, p[1] = mem#, p[2] = chks, a[4] = mem_param_string
+			// band#		// STO <bnum> <mchr> <chks> "str"
+
+		case mstr:														// mem string: p[0] = band+1, p[1] = mem#, p[2] = string
+			putsQ("MSTR <mid> <mchr> 'str' ?");
+			putsQ("\tStore MEM Name String, <mid> is module ID (Ux19 = 1, UX-129 = 6),");
+			putsQ("\t<mchr> = the mem# chr ID");
+			putsQ("\t       Valid = AlphaNum & ( ) [ ] !! EXCEPT C, I, O, Q !!");
+			putsQ("\t'str' = mem name str (15 bytes max)");
+			break;
+
+		case tone:														// tone: p[0] = mid, p[1] = tone freq, p[2] = on/off
+			putsQ("TONE <mid> <tfreq> <on/off> ?");
+			putsQ("\tStore tone & set on/off, <mid> is module ID (Ux19 = 1, UX-129 = 6),");
+			putsQ("\tIf <tfreq> omitted, just adjust on/off");
+			putsQ("\tIf <on/off> omitted, just adjust tfreq");
+			i = 0;
+			do{
+				k = pl_lookup(i);
+				if(k != 0xffff){
+					sprintf(hbuf,"\t%3.1f",(float)(k)/10.0);
+					putssQ(hbuf);
+					if((++i%6) == 0) putsQ("");
+				}
+			}while(k != 0xffff);
+			putsQ("");
+			break;
+
+		case dup:														// duplex: p[0] = mid, p[1] = +/-/S
+			putsQ("DUP <mid> <+/-/S> ?");
+			putsQ("\tSet duplex, <mid> is module ID (Ux19 = 1, UX-129 = 6)");
+			break;
+
+		case hilo:														// hilo: p[0] = mid, p[1] = H/L/1/0
+			putsQ("HIlo <mid> <H/L/1/0> ?");
+			putsQ("\tSet RF power, <mid> is module ID (Ux19 = 1, UX-129 = 6)");
+			break;
+
+		case volc:														// vol: p[0] = mid, p[1] = vol
+			putsQ("Vol <mid> <0-34> ?");
+			putsQ("\tSet VOL, <mid> is module ID (Ux19 = 1, UX-129 = 6)");
+			break;
+
+		case squc:														// squ: p[0] = mid, p[1] = squ
+			putsQ("Squ <mid> <0-34> ?");
+			putsQ("\tSet SQU, <mid> is module ID (Ux19 = 1, UX-129 = 6)");
+			break;
+
+		case tsac:														// tsa: p[0] = mid, p[1] = ts value
+			putsQ("TSA <mid> <0-1000 KHz> ?");
+			putsQ("\tSet TSA, <mid> is module ID (Ux19 = 1, UX-129 = 6)");
+			break;
+
+		case tsbc:														// tsb: p[0] = mid, p[1] = ts value
+			putsQ("TSB <mid> <0-1000 KHz> ?");
+			putsQ("\tSet TSB, <mid> is module ID (Ux19 = 1, UX-129 = 6)");
+			break;
+
+		case pttsub:													// pttsub: p[0] = mid, p[1] = 1-4, none, smute, scall, mcall
+			putsQ("PTT-SUB <mid> <mode> ?");
+			putsQ("\tSet PTTSub, <mid> is module ID (Ux19 = 1, UX-129 = 6),");
+			putsQ("\t<mode> = '1', no-action at PTT xsitions");
+			putsQ("\t<mode> = '2', toggle SMUTE at PTT xsitions");
+			putsQ("\t<mode> = '3', toggle SUB-CALL at PTT xsitions");
+			putsQ("\t<mode> = '4', toggle MAIN-CALL at PTT xsitions");
+			break;
+
+		case setnvall:													// nvall: p[0] = start_bid, p[1] = stop_bid
+			putsQ("NVALL <start_mid> <stop_mid> ?");
+			putsQ("\tSave VFO(s) to NVRAM, <mid> is module ID (Ux19 = 1, UX-129 = 6)");
+			break;
+
+/////////////////////////////////////
+		case hm_data:													// debug
 			putsQ("Hm data: ?");
 			putsQ("\tdisplay HM-151 key data, ESC to exit");
 			break;
 
-		case kp_data:													// set ant stop
+/*		case kp_data:													// debug
 			putsQ("Kp data: ?");
 			putsQ("\tdisplay key-pad data, ESC to exit");
 			break;
 
-		case tstuart1:													// UART1 tst CMD
+		case tstuart1:													// debug UART1 tst CMD
 			// Test UART1:  TSTU1 ?/<string>/W: loop output of <string>
 			putsQ("TSTU1 (Test UART1): ?/<string>/W (loop until ESC)");
 			break;
 
-		case adc_tst:													// ADC tst CMD
+		case adc_tst:													// debug ADC tst CMD
 			// Test ADC:  Adc test ?
 			putsQ("Adc test: ?");
 			break;
 
-		case tst_enc:													// ADC tst CMD
+		case tst_enc:													// debug ADC tst CMD
 			// Test Enc:  Enc ?
 			putsQ("Enc test: ?");
 			putsQ("\tDisp encoder changes, ESC to exit.");
 			break;
 
-		case tst_pwm:													// ADC tst CMD
+		case tst_pwm:													// debug ADC tst CMD
 			// Pwm debug:  P ?
 			putsQ("Pwm test: <pwm#>/<value>/?");
 			putsQ("\tDisplay min/max PWM and set PWM values.");
 			putsQ("\t<pwm#> = 2 - 6");
 			break;
 
-/*		case tst_tempa:													// ADC tst CMD
-			// Test I2C ambient temp:  Temp a ?
-			putsQ("Temp ambient: <res>/W/?");
-			putsQ("\t<res>: 0 = 0.5, 1 = 0.25, 2 = 0.125, 3 = 0.0625");
-			putsQ("\tW to loop (ESC to exit)");
-			break;*/
-
-		case timer_tst:													// ADC tst CMD
+		case timer_tst:													// debug ADC tst CMD
 			// Test timer:  TI ?
 			putsQ("TImer test: ?");
 			putsQ("\tToggles PC4 @200ms period");
-			break;
+			break;*/
 
 		default:
 			c = FALSE;
@@ -1474,10 +1830,10 @@ void get_BCD32(char *sptr, U32 *bcdval){
 //	argsrt specifies the first item to be searched and aligns argsrt with params[0]
 //	for multi-arg cmds, fields must be entered in order.
 //=============================================================================
-U8 get_Dargs(U8 argsrt, U8 nargs, char* args[ARG_MAX], U16 params[8]){
+U8 get_Dargs(U8 argsrt, U8 nargs, char* args[ARG_MAX], U32 params[8]){
 
 	char*	s;
-	U16*	ptr1;
+	U32*	ptr1;
 	S32		temp32;
 	U8		i;
 	U8		count = 0;
@@ -1493,20 +1849,20 @@ U8 get_Dargs(U8 argsrt, U8 nargs, char* args[ARG_MAX], U16 params[8]){
 
 				default:
 					count += sscanf(s,"%d",&temp32);			// get decimal value
-					*ptr1 = (U16)(temp32);
+					*ptr1 = temp32;
 					break;
 
 				case '$':
 					s++;
 					count += sscanf(s,"%x",&temp32);			// get hex if leading "$"
-					*ptr1 = (U16)(temp32);
+					*ptr1 = temp32;
 					break;
 
 				case 'O':
 				case 'o':
 					s++;
 					count += sscanf(s,"%o",&temp32);			// get octal if leading "O"
-					*ptr1 = (U16)(temp32);
+					*ptr1 = temp32;
 					break;
 			}
 		}
@@ -1543,7 +1899,28 @@ const char end_list[] = {0xff};
 	char	i;								// temp
 	char	found = FALSE;					// cmd found flag (default to not found)
 
-	ptr = (char*)cmd_list;										// start at beginning of serach list
+	ptr = cmd_list[cmdid];										// start at beginning of search list
+	while((*ptr & 0x80) != 0x80){								// process until 0xff found in search list
+		i = strncmp(string, ptr, strlen(ptr));					// inbound string match search list?
+		if(i){
+			cmdid++;											// no, advance to next cmdid
+			ptr = cmd_list[cmdid];
+//			while(*ptr++);										// skip to next item in search list
+		}else{
+			ptr = (char*)end_list;								// found match,
+			found = TRUE;										// set break-out criteria
+		}
+	}
+	if(!found) cmdid = lastcmd;									// not found, set error cmd id
+	return cmdid;
+}
+
+/*	char*	ptr;							// temp ptr
+	char	cmdid = 0;						// start at beginning of cmd_enum
+	char	i;								// temp
+	char	found = FALSE;					// cmd found flag (default to not found)
+
+	ptr = (char*)cmd_list;										// start at beginning of search list
 	while((*ptr & 0x80) != 0x80){								// process until 0xff found in search list
 		i = strncmp(string, ptr, strlen(ptr));					// inbound string match search list?
 		if(i){
@@ -1556,7 +1933,7 @@ const char end_list[] = {0xff};
 	}
 	if(!found) cmdid = lastcmd;									// not found, set error cmd id
 	return cmdid;
-}
+}*/
 
 //=============================================================================
 // parm_srch() looks for a match of parm_str in any non-empty args[] strings
@@ -1612,9 +1989,10 @@ void str_toupper(char *string){
 }
 
 //=============================================================================
-// parse string for delimited arguments
-//  on exit, the args[] array holds each delimited argument from the command string input:
-//  args[0] holds first arg (command)
+// parse command line array for delimited arguments.  Called prior to entry into x_cmdfn().
+//  on exit, the args[] array (an array of char pointers) holds each delimited argument
+//	from the command string input:
+//  args[0] holds first arg (the command token)
 //  args[1] holds next arg
 //  args[2] etc...
 //  up to args[ARG_MAX]
@@ -1665,6 +2043,7 @@ int parse_args(char* cmd_string, char* args[ARG_MAX]){
         }
         cmd_string++;							// loop...
     } while (1);
+    // no return here, we'll never get here anyway...
 }
 
 //=============================================================================
@@ -2069,6 +2448,8 @@ static	U8	cm_last;		// last cmd
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 // hm_map() maps the MFmic hm command intercept to a local key ID and fills the hm_buf[]
+//	cm = key code (ASCII, maps to keypad on HM-133 interface)
+//	hm = (p)ress/(h)old/(r)elease
 //-----------------------------------------------------------------------------
 //char keychr_lut[] = {  TSchr, };
 void hm_map(U8 cm, U8 hm){
@@ -2191,6 +2572,36 @@ void hm_map(U8 cm, U8 hm){
 				j = Vdnchr;
 				break;
 
+
+			case SH_C:
+  			case 'C':
+  				// only act on press cmd
+  				if(hm == 'p'){
+  	  				// bflags hold the pttsub action status.  read the current bflags
+  	  				i = get_bflag(MAIN, 0, 0);
+  	  				j = i & PTTSUB_M;
+  	  				// response beeps indicate status
+  	  				switch(j){
+  	  				case PTTSUB_MOD0:
+  	  					do_1beep();
+  						break;
+
+  	  				case PTTSUB_MOD1:
+  	  					do_2beep();
+  	  					break;
+
+  	 				case PTTSUB_MOD2:
+  	  					do_3beep();
+  						break;
+
+  	 				default:
+  	  				case PTTSUB_MOD3:
+  	  					do_4beep();
+  	 					break;
+  	 				}
+  				}
+				j = '\0';
+				break;
 
 			case SH_D:
   			case 'D':
@@ -2434,6 +2845,7 @@ char process_CMD(U8 flag){
 		hm_hptr = 0;									// init MFmic head/tail buffer indexes
 		hm_tptr = 0;
 		shft_time(CLEAR_TIMER);							// clear timeout
+		pttsub_togg(0);									// init pttsub statics
 		return 0;
 	}
 	// process shift timeout -- turn off shift and execute beeps
@@ -2498,33 +2910,140 @@ void hm_sto(U8 j){
 //-----------------------------------------------------------------------------
 // pttsub_togg() issues call or smute toggle as an ersatz keypress based on
 //	the bflags
+//	!! For mode 4, we need to track MEM status since changes were made to how MEM/CALL
+//		transitions are handled.  This also necessitates knowing the state of PTT
 //j |= KREL_FLAG;
 //-----------------------------------------------------------------------------
-	void pttsub_togg(U8 bflags){
-	U8	i;		//temp
+void pttsub_togg(U8 bflags){
+			U8	i;			// temp
+	static	U8	memcall;	// mem/call memory
 
 	i = bflags & PTTSUB_M;
 	switch(i){
-	default:				// nop
+	// mode 1
+	default:							// nop
+		memcall = 0;					// init statics
 		break;
 
-	case PTTSUB_SMUT:		// issue mute toggle
+	// mode 2
+	case PTTSUB_SMUT:					// issue mute toggle
 		hm_sto(SMUTEchr);
 		break;
 
-	case PTTSUB_CALL:		// issue sub-call toggle
+	// mode 3
+	case PTTSUB_CALL:					// issue sub-call toggle
 		hm_sto(SSUBchr);
 		hm_sto(CALLchr);
 		hm_sto(RSUBchr);
 		break;
 
-	case PTTSUB_CALL|PTTSUB_SMUT:	// issue main-call toggle
+	// mode 4
+	case PTTSUB_CALL|PTTSUB_SMUT:		// issue mem toggle
+	if((xmode_stat(MAIN) & MEM_XFLAG) || (memcall & MEM_XFLAG)){
+		// mem active...
+		if(query_tx()){
+			// save mem/call status
+			memcall = xmode_stat(MAIN);
+			hm_sto(MMAINchr);
+			hm_sto(CALLchr);
+			hm_sto(RMAINchr);
+		}else{
+			// restore mem status
+			hm_sto(MMAINchr);
+			hm_sto(MRchr);
+			hm_sto(RMAINchr);
+			memcall = 0;
+		}
+	}else{
+		// VDO mode
 		hm_sto(MMAINchr);
 		hm_sto(CALLchr);
 		hm_sto(RMAINchr);
+	}
+
 		break;
 	}
 	return;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// send_stat() issues a serial status message
+//	All status messages feature printable ASCII characters except for the NEWLINE terminator.
+//	This gives 6 bits of payload per character with bit 0x40 set.  Checksum is 12 bits divided
+//	between two payload bytes.
+//	<type> identifies which status type is send, "r" = SRF, "s" = status, "f" = freq, & "o" = offs
+// SRF status:
+//	#R<srf_main><srf_sub><cos/ptt><checkH><checkL>$<\n>
+// MAIN status:
+//	#S<flag1><flag2><vol><squ><tonecode><rit><xit><checkH><checkL>$<\n>
+//	#F<freq_hz><checkH><checkL>$<\n>
+//	#O<offs_hz><checkH><checkL>$<\n>
+// SUB status:
+//	#s<flag1><flag2><vol><squ><tonecode><rit><xit><checkH><checkL>$<\n>
+//	#f<freq_hz><checkH><checkL>$<\n>
+//	#o<offs_hz><checkH><checkL>$<\n>
+//-----------------------------------------------------------------------------
+void send_stat(U8 focus, U8 type, char* sptr){
+	char*	lptr = sptr;	// temps
+	U16		ii;
+
+	// send SRF params
+	*sptr++ = '#';										// open response
+	*sptr++ = 'R';
+	*sptr++ = get_srf(MAIN) | 0x40;
+	*sptr++ = get_srf(SUB) | 0x40;
+	*sptr++ = get_cos() | get_changestat() | 0x40;		// combine COS/PTT/and change status => [01ms 0pMS] ms = main/sub change status
+														// p = PTT status, MS = main/sub COS status
+	ii = scheck(lptr+1, 4);								// split checksum into 2, 6bit values
+	*sptr++ = ((ii >> 6) & 0x3f) | 0x40;
+	*sptr++ = (ii & 0x3f) | 0x40;
+	*sptr++ = '$';										// close response
+//	*sptr++ = '\r';
+	*sptr = '\0';
+
+/*	adjust_squ(focus, 0);
+	adjust_vol(focus, 0);
+	read_tone(focus);
+	read_dplx(focus);
+
+	sprintf(obuf,"#$", LIM_END);
+	putsQ(obuf);*/
+
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// scheck() calculates the U16 algebraic sum of "len" bytes of the "sptr" array
+//-----------------------------------------------------------------------------
+U16 scheck(char* sptr, U8 len){
+	U8		i;		// counter
+	U16		ii;		// temp sum
+
+	for(i=0, ii=0; i<len; i++){
+		ii += *sptr++;
+	}
+	return ii;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// upd_lcd() updates LCD based on changes input via CAT commands
+//	bid is the band id that was changed
+//-----------------------------------------------------------------------------
+void upd_lcd(U8 bid){
+	U8	l;
+	U8	j;
+	U8	h;
+
+	l = query_mode();						// get current display mode (M/S)
+	if(l == MAIN) j = SUB;					// set j = alternate band
+	else j = MAIN;
+	h = get_band_index(l);					// get bid of current band
+	if(bid == h) update_lcd(l, l);			// if that band was changed, update LCD
+	h = get_band_index(j);					// get bid of other band
+	if(bid == h) update_lcd(l, j);			// if THAT band was changed, update LCD
+	return;
+}
 // eof

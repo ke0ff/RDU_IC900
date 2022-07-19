@@ -50,3 +50,6 @@ U8 hm_asc(void);
 char process_CMD(U8 flag);
 U8 set_shift(U8 tf);
 void pttsub_togg(U8 bflags);
+void send_stat(U8 focus, U8 type, char* sptr);
+U16 scheck(char* sptr, U8 len);
+void upd_lcd(U8 bid);

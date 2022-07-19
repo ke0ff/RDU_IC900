@@ -109,6 +109,8 @@
 #define	CLEAR_TIMER		0xff				// timer control Fn signals
 #define	READ_TIMER		0x00
 #define	SET_TIMER		0x01
+#define	CATA_TIME		PSEC2				// CAT activity rate
+#define	CATO_TIME		PSEC10				// CAT timeout rate
 
 // ssi bit rate defns
 // BR = SYSCLK/(CPSR * (1 + SCR))
@@ -485,6 +487,8 @@ U8 offs_time(U8 tf);
 U8 hmk_time(U8 tf);
 U8 dfe_time(U8 tf);
 U8 shft_time(U8 tf);
+U8 cato_time(U8 tf);
+U8 cata_time(U8 tf);
 U8 sub_time(U8 tf);
 U8 mic_time(U8 tf);
 U8 micdb_time(U8 tf);

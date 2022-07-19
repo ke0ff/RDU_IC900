@@ -45,6 +45,8 @@ struct vfo_struct {
 	U8	tsb;						// frq step "B" setting
 };
 
+enum vfos_enum{ vfoid, offsid, discid, lvlid };
+
 // NVRAM memory map
 #define	NVRAM_BASE	(0L)
 // Each VFO is stored to NVRAM as a "union" with individual elements of disparate arrays
@@ -60,11 +62,13 @@ struct vfo_struct {
 #define	BFLAGS_0	(CALL_0 + sizeof(U8))		// expansion flags
 #define	PTTSUB_SMUT	0x40						// ptt-sub edge action mode bits and field mask
 #define	PTTSUB_CALL	0x80
+#define	PTTSUB_bs	6
 #define	PTTSUB_M	(PTTSUB_SMUT | PTTSUB_CALL)
 #define	PTTSUB_MOD0	0
 #define	PTTSUB_MOD1	PTTSUB_SMUT
 #define	PTTSUB_MOD2	PTTSUB_CALL
 #define	PTTSUB_MOD3	(PTTSUB_SMUT | PTTSUB_CALL)
+
 #define	SCANFLAGS_0	(BFLAGS_0 + sizeof(U8))		// scan (expansion) flags
 #define	TSA_0		(SCANFLAGS_0 + sizeof(U8))	// frq step "A"
 #define	TSB_0		(TSA_0 + sizeof(U8))		// frq step "B"
@@ -189,9 +193,13 @@ struct vfo_struct {
 // set/read_tsab():
 #define	TSA_SEL			1			// selects TSA
 #define	TSB_SEL			2			// selects TSB
-#define	TS_5			1			// 5 KHz step
-#define	TS_10			2			// 10 KHz step
-#define	TS_25			5			// 25 KHz step
+#define	TS_PER			5
+#define	TS_5			(5/TS_PER)		// 5 KHz step
+#define	TS_10			(10/TS_PER)		// 10 KHz step
+#define	TS_25			(25/TS_PER)		// 25 KHz step
+#define	TS_100			(100/TS_PER)	// 100 KHz step
+#define	TS_125			(125/TS_PER)	// 125 KHz step
+#define	TS_MAX			(1000/TS_PER)	// 1000 KHz step
 
 //-----------------------------------------------------------------------------
 // Global Fns
@@ -200,8 +208,9 @@ struct vfo_struct {
 void init_radio(void);
 void process_SIN(U8 cmd);
 U8 process_SOUT(U8 cmd);
-void  save_vfo(U8 b_id);
-void  recall_vfo(void);
+void save_vfo(U8 b_id);
+void nvwr_vfo(U8 startid, U8 stopid);
+void recall_vfo(void);
 //U16 crc_vfo(void);
 U16 crc_hib(void);
 U16 calcrc(U8 c, U16 oldcrc);
@@ -269,3 +278,18 @@ void set_memnum(U8 bid, U8 memnum);
 U8  get_bflag(U8 focus, U8 cmd, U8 bfset);
 U8 get_modulid(U32 freqMM);
 void copy_2vfo(U8 main, U32 vfod);
+U8 get_srf(U8 focus);
+U8 get_cos(void);
+U8 get_changestat(void);
+void put_vfo(U8 focus, char* sptr, U8 sid);
+void set_vfo(U32 freq, U8 bid);
+void set_offs2(U32 freq, U8 bid);
+void set_ctcss(U8 code, U8 bid);
+void set_ctcsson(U8 ton, U8 bid);
+void set_vol(U8 code, U8 bid);
+void set_squ(U8 code, U8 bid);
+void set_tsa(U8 step, U8 bid);
+void set_tsb(U8 step, U8 bid);
+void set_dplx(U8 dup, U8 bid);
+void set_lohi(U8 lohi, U8 bid);
+U8 set_pttsub(U8 pttsub, U8 bid);

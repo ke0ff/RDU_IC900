@@ -697,9 +697,7 @@ U8 process_SOUT(U8 cmd){
 //	else, only save one indexed dataset
 //-----------------------------------------------------------------------------
 void  save_vfo(U8 b_id){
-	U8	i;
-	U32	j;
-	U8	k;
+	U32	jj;
 	U8	startid;
 	U8	stopid;
 
@@ -714,38 +712,52 @@ void  save_vfo(U8 b_id){
 		stopid = b_id + 1;
 		if((get_xmode(b_id) & (MC_XFLAG)) && (b_id < ID1200)){
 			// if call or mem mode, just save mem/call#:
-			j = SQ_0 + (VFO_LEN * startid);						// set start @ squ
-			rw8_nvr(j, vfo_p[startid].sq, CS_WRITE|CS_OPEN);	// save squ and vol
-			rw8_nvr(j, vfo_p[startid].vol, CS_WRITE|CS_CLOSE);
+			jj = SQ_0 + (VFO_LEN * startid);					// set start @ squ
+			rw8_nvr(jj, vfo_p[startid].sq, CS_WRITE|CS_OPEN);	// save squ and vol
+			rw8_nvr(jj, vfo_p[startid].vol, CS_WRITE|CS_CLOSE);
 			return;												// exit now...
 		}
 	}
 	// save m/s vol
 	vfo_p[0].vol = vol_s;
 	vfo_p[1].vol = vol_m;
+	nvwr_vfo(startid, stopid);
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// nvwr_vfo() copies VFO struct to NVRAM
+//	call this fn anytime something changes in a VFO
+//	startid is first ID and stopid = last id + 1
+//-----------------------------------------------------------------------------
+void  nvwr_vfo(U8 startid, U8 stopid){
+	U8	i;
+	U32	jj;
+	U8	k;
+
 	// combine VFO/offset into single 32 bit value
 	k = CS_WRITE | CS_OPEN;
-	for(i=startid, j=VFO_0 + (VFO_LEN * startid); i<stopid; i++){
-		rw32_nvr(j, vfo_p[i].vfo, k);							// write each element of the band state in sequence
+	for(i=startid, jj=VFO_0 + (VFO_LEN * startid); i<stopid; i++){
+		rw32_nvr(jj, vfo_p[i].vfo, k);							// write each element of the band state in sequence
 		k = CS_WRITE;											// the addr (j) only matters for first call in an "OPEN" sequence.  So...
 																// we don't update it here (the NVRAM increments it automatically).  Saves
-		rw16_nvr(j, vfo_p[i].offs, k);							// a lot of SPI clock cycles.
-		rw8_nvr(j, vfo_p[i].dplx, k);
-		rw8_nvr(j, vfo_p[i].ctcss, k);
-		rw8_nvr(j, vfo_p[i].sq, k);
-		rw8_nvr(j, vfo_p[i].vol, k);
+		rw16_nvr(jj, vfo_p[i].offs, k);							// a lot of SPI clock cycles.
+		rw8_nvr(jj, vfo_p[i].dplx, k);
+		rw8_nvr(jj, vfo_p[i].ctcss, k);
+		rw8_nvr(jj, vfo_p[i].sq, k);
+		rw8_nvr(jj, vfo_p[i].vol, k);
 		if(i >= ID1200){
-			rw8_nvr(j, mem[i-ID1200], k);
-			rw8_nvr(j, call[i-ID1200], k);
+			rw8_nvr(jj, mem[i-ID1200], k);
+			rw8_nvr(jj, call[i-ID1200], k);
 		}else{
-			rw8_nvr(j, mem[i], k);
-			rw8_nvr(j, call[i], k);
+			rw8_nvr(jj, mem[i], k);
+			rw8_nvr(jj, call[i], k);
 		}
-		rw8_nvr(j, vfo_p[i].bflags, k);
-		rw8_nvr(j, vfo_p[i].scanflags, k);
-		rw8_nvr(j, vfo_p[i].tsa, k);
+		rw8_nvr(jj, vfo_p[i].bflags, k);
+		rw8_nvr(jj, vfo_p[i].scanflags, k);
+		rw8_nvr(jj, vfo_p[i].tsa, k);
 		if(i == (stopid - 1)) k |= CS_CLOSE;
-		rw8_nvr(j, vfo_p[i].tsb, k);
+		rw8_nvr(jj, vfo_p[i].tsb, k);
 	}
 	rw8_nvr(XIT_0, ux129_xit, CS_WRITE | CS_OPEN);				// save xit/rit/bandid
 	rw8_nvr(RIT_0, ux129_rit, CS_WRITE);
@@ -2493,6 +2505,241 @@ U8 togg_scanmem(U8 focus){
 	j ^= SCANEN_F;										// invert scan bit
 	rw8_nvr(addr, j, CS_WRITE | CS_OPENCLOSE);			// write byte
 	return j & SCANEN_F;								// return masked bit
+}
+
+//-----------------------------------------------------------------------------
+// get_srf() returns srf
+//-----------------------------------------------------------------------------
+U8 get_srf(U8 focus){
+	U32	ii;
+	U8	i;
+
+	if(focus){
+		// get main SRF
+		ii = sin_addr0 >> 23;								// isolate main and sub SRF
+		i = (U8)(ii & 0x0f) >> 1;
+	}else{
+		ii = sin_addr0 >> 19;								// isolate main and sub SRF
+		i = (U8)(ii & 0x0f) >> 1;
+	}
+	return i;
+}
+
+//-----------------------------------------------------------------------------
+// get_cos() returns COS/PTT flags
+//-----------------------------------------------------------------------------
+U8 get_cos(void){
+	U32	ii;
+	U8	i;
+
+	// get main SRF
+	ii = sin_addr0 & (SIN_SQSA|SIN_SQSB);					// isolate main and sub SRF
+	ii >>= SIN_SQSB_bp;
+	i = (U8)ii;
+	ii = (sin_addr1 & SIN_SEND) >> (SIN_SEND_bp - 2);		// place PTT at b2
+	i |= (U8)ii;
+	return i;
+}
+
+//-----------------------------------------------------------------------------
+// get_changestat() returns srf
+//-----------------------------------------------------------------------------
+U8 get_changestat(void){
+
+	return 0;
+}
+
+
+//-----------------------------------------------------------------------------
+// put_vfo() extracts data from the VFO struct to sent to the remote host.
+//	Several formats are supported:
+//	There are 4 basic variations, frequency, offset, discrete flags, level registers
+//	main, sub, or individual bandids can be accessed.  If focus has its hi-bit set,
+//		it holds a bandid.
+//
+//	The vfo struct for reference:
+//struct vfo_struct {
+//	U32	vfo;						// main vfo frequency (RX) in KHz
+//	U16	offs;						// TX offset in KHz
+//	U8	dplx;						// duplex/RFpwr/XIT/MEM - packed flags for each resource
+//	U8	ctcss;						// PL setting and "OFF" control bit
+//	U8	sq;							// SQ setting
+//	U8	vol;						// VOL setting
+//	U8	bflags;						// expansion flags
+//	U8	scanflags;					// scan flags (expansion)
+//	U8	tsa;						// frq step "A" setting
+//	U8	tsb;						// frq step "B" setting
+//};
+//-----------------------------------------------------------------------------
+void put_vfo(U8 focus, char* sptr, U8 sid){
+	U32		ii;			// temps
+	char*	lptr = sptr;
+	char	c;
+	U8		i;
+
+	if(focus & 0x80){
+		i = focus & 0x07;
+		if(i > (ID1200 - 1)){
+			i = 0;					// failsafe
+			c = 'x';				// error signal
+		}else{
+			c = i + '0';
+		}
+	}else{
+		if(focus == MAIN){
+			i = bandid_m;
+			c = 'M';
+		}else{
+			i = bandid_s;
+			c = 'S';
+		}
+	}
+	switch(sid){
+	case vfoid:
+		ii = vfo_p[i].vfo;
+		sprintf(sptr,"#F%c%010d--$", c, ii*1000L);
+		ii = scheck(lptr+1, 12);
+		*(lptr+13) = ((ii >> 6) & 0x3f) | 0x40;
+		*(lptr+14) = (ii & 0x3f) | 0x40;
+		break;
+
+	case offsid:
+		ii = vfo_p[i].offs;
+		sprintf(sptr,"#O%c%010d--$", c, ii*1000L);
+		ii = scheck(lptr+1, 12);
+		*(lptr+13) = ((ii >> 6) & 0x3f) | 0x40;
+		*(lptr+14) = (ii & 0x3f) | 0x40;
+		break;
+
+	case discid:
+		sprintf(sptr,"#D%c%02x%02x%02x%02x--$", c, vfo_p[bandid_s].dplx, vfo_p[bandid_s].ctcss, vfo_p[bandid_s].bflags, vfo_p[bandid_s].scanflags);
+		ii = scheck(lptr+1, 10);
+		*(lptr+11) = ((ii >> 6) & 0x3f) | 0x40;
+		*(lptr+12) = (ii & 0x3f) | 0x40;
+		break;
+
+	case lvlid:
+		sprintf(sptr,"#L%c%02x%02x%02x%02x--$", c, vfo_p[bandid_s].sq, vfo_p[bandid_s].vol, vfo_p[bandid_s].tsa, vfo_p[bandid_s].tsb);
+		ii = scheck(lptr+1, 10);
+		*(lptr+11) = ((ii >> 6) & 0x3f) | 0x40;
+		*(lptr+12) = (ii & 0x3f) | 0x40;
+		break;
+	}
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_vfo() stores freq to vfo
+//-----------------------------------------------------------------------------
+void set_vfo(U32 freq, U8 bid){
+
+	vfo_p[bid].vfo = freq;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_offs() stores freq to offs
+//-----------------------------------------------------------------------------
+void set_offs2(U32 freq, U8 bid){
+
+	vfo_p[bid].offs = (U16)freq;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_ctcss() stores code to ctcss
+//-----------------------------------------------------------------------------
+void set_ctcss(U8 code, U8 bid){
+
+	vfo_p[bid].ctcss &= ~CTCSS_MASK;
+	vfo_p[bid].ctcss |= CTCSS_MASK & code;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_ctcsson() turns CTCSS on/off
+//-----------------------------------------------------------------------------
+void set_ctcsson(U8 ton, U8 bid){
+
+	if(ton){
+		vfo_p[bid].ctcss &= ~CTCSS_OFF;
+	}else{
+		vfo_p[bid].ctcss |= CTCSS_OFF;
+	}
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_vol() stores code to vol
+//-----------------------------------------------------------------------------
+void set_vol(U8 code, U8 bid){
+
+	vfo_p[bid].vol = code;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_squ() stores code to squ
+//-----------------------------------------------------------------------------
+void set_squ(U8 code, U8 bid){
+
+	vfo_p[bid].sq = code;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_tsa() stores tstep to tsa
+//-----------------------------------------------------------------------------
+void set_tsa(U8 step, U8 bid){
+
+	vfo_p[bid].tsa = step;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_tsb() stores tstep to tsb
+//-----------------------------------------------------------------------------
+void set_tsb(U8 step, U8 bid){
+
+	vfo_p[bid].tsb = step;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_dplx() stores dup to duplex
+//-----------------------------------------------------------------------------
+void set_dplx(U8 dup, U8 bid){
+
+	vfo_p[bid].dplx &= ~(DPLX_P|DPLX_M);
+	vfo_p[bid].dplx |= (DPLX_P|DPLX_M) & dup;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_lohi() stores lohi status to duplex
+//-----------------------------------------------------------------------------
+void set_lohi(U8 lohi, U8 bid){
+
+	vfo_p[bid].dplx &= ~LOHI_F;
+	vfo_p[bid].dplx |= (LOHI_F) & lohi;
+	return;
+}
+
+//-----------------------------------------------------------------------------
+// set_pttsub() PTTSUB status change/querry
+//	if(pttsub == 0xff) returns current setting
+//	else store new pttsub setting to bflags byte
+//-----------------------------------------------------------------------------
+U8 set_pttsub(U8 pttsub, U8 bid){
+	U8	i = 0;	// return value
+
+	if(pttsub == 0xff){
+		i = vfo_p[bid].bflags & PTTSUB_M;
+	}else{
+		vfo_p[bid].bflags &= ~PTTSUB_M;
+		vfo_p[bid].bflags |= PTTSUB_M & pttsub;
+	}
+	return i;
 }
 
 // end radio.c
