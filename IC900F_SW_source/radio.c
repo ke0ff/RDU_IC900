@@ -66,6 +66,8 @@ U32	sin_flags;							// bitmapped activity flags that signal changed data
 U8	sout_flags;							// signal for SOUT changes
 U8	ux_present_flags;					// bitmapped "present" (AKA, "installed") flags.
 U32	ptt_mem;							// PTT memory
+U32	ud_reg;								// up/dn SIN data siphoned direct from input capture
+
 // **************************************************************
 // these data structures are mirrored in a SW shadow NVRAM (HIB RAM)
 //	each band module has its own cluster of data for frq, offset, etc...
@@ -485,8 +487,8 @@ void process_SIN(U8 cmd){
 	tt = get_error();
 	if(tt != lerr){
 		lerr = tt;
-		sprintf(dbuf,"ORerr = %d, free = %d", tt, get_free());
-		putsQ(dbuf);
+//		sprintf(dbuf,"ORerr = %d, free = %d", tt, get_free());
+//		putsQ(dbuf);
 	}
 //	print_ptr(); //!!!
 	return;
@@ -1843,9 +1845,89 @@ S32 set_mhz_step(S32 sval){
 //-----------------------------------------------------------------------------
 S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq){
 	static	S8	i;			// return value
-	static	U8	click_mem;	// button pressed memory
+	static	U32	click_mem;	// button pressed memory
+	static	U8	mstate;		// state memory
 			S8	rtn = 0;
+			U32	j;
 
+#define	MUD_IDLE	0
+#define	MUD_DB		1
+#define	MUD_PRSD	2
+
+	if(ipl){
+		i = 0;				// init statics
+		click_mem = 0L;
+		mstate = MUD_IDLE;
+		micdb_time(0xff);
+		mic_time(0xff);
+		ud_reg = 0L;
+		return 0;
+	}
+	j = (ud_reg & (SIN_MUP | SIN_MCK));
+	switch(mstate){
+	default:
+	case MUD_IDLE:
+		if(click_mem != j){
+			click_mem = j;
+			if(j){											// if activity, set course for debounce
+				micdb_time(1);								// set debounce timer
+				mstate = MUD_DB;
+			}
+		}
+		break;
+
+	case MUD_DB:
+		if(click_mem != j){
+			mstate = MUD_IDLE;
+			i = 0;
+		}else{
+			if(!micdb_time(0)){
+				mic_time(2);								// set long gap time for first press
+		    	if(j == (SIN_MUP | SIN_MCK)){
+		    		i = 1;									// if up button pressed, set +
+		    	}
+		    	if(j == (SIN_MCK)){
+		    		i = -1;									// if dn button pressed, set -
+		    	}
+	    		do_dial_beep();								// beep
+				rtn = i;
+				mstate = MUD_PRSD;
+			}
+		}
+		break;
+
+	case MUD_PRSD:
+		if(click_mem != j){
+			mstate = MUD_IDLE;
+			i = 0;
+		}else{
+			if(!mic_time(0)){
+				mic_time(1);								// set short gap time for hold press
+				// if mem mode & no scan, start scan
+				if(focus == MAIN){
+					if(!(xmq & MSCANM_XFLAG)){					// process main
+						if(!doscan(focus, 1)){
+				    		do_dial_beep();					// beep
+							rtn = i;
+						}
+					}
+				}else{
+					if(!(xmq & MSCANS_XFLAG)){					// process sub
+						if(!doscan(focus, 1)){
+				    		do_dial_beep();					// beep
+							rtn = i;
+						}
+					}
+				}
+			}
+		}
+		break;
+	}
+	return rtn;
+}
+
+
+/* 2nd attempt...
 	if(ipl){
 		i = 0;				// init statics
 		click_mem = 0;
@@ -1895,7 +1977,7 @@ S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq){
 		}
 	}
 	return rtn;
-
+*/
 
 
 /*    S8	i = 0;		// return value (no button)
@@ -1931,8 +2013,8 @@ S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq){
 	    	read_sin_flags(SIN_MCK_F);						// if dn during debounce, ignore and clear flag
     	}
 	}
-   return i;*/
-}
+   return i;
+}*/
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
@@ -2960,6 +3042,16 @@ U8 set_pttsub(U8 pttsub, U8 bid){
 U8 save_ee(U16 eeaddr){
 
 	return eewr(eeaddr,eearray[eeaddr]);
+}
+
+//-----------------------------------------------------------------------------
+// save_ee() copies 1 word of mirror array to eeprom
+//	returns pass/fail
+//-----------------------------------------------------------------------------
+void pass_ud(U32 saddr1){
+
+	ud_reg = saddr1;
+	return;
 }
 
 // end radio.c

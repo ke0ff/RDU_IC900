@@ -35,6 +35,9 @@
  *
  *						!!! need to validate new freq @RF
  *
+ *	  01-27-24 jmh:		UP/DN button flakiness due to data loss inside the RTOS.  The band-aid fix was to provide a direct line fron the SIN capture
+ *							to the is_mic_updn() function.  Also re-wrote is_mic_updn() to use a state machine.
+ *
  *	  01-20-24 jmh:		Implemented bi-phase encoder wrapped in a build trap to allow compatibility with the IC900 hardware target (up/dn encoder)
  *	  						Encoder traps all edges but flip-flops active phase to skip over noise bands at leading edge of the changing phase.
  *	  						This plus an RC = 36K*1100pF of filtering means that a debounce timer is not needed.
@@ -50,7 +53,7 @@
  *	  01-19-24 jmh:		Beginning of IC-900F model DVT and feature creep.
  *	  					Interfaces to the DU clone to display the IC900 symbols onto a 240x128 LCD screen.
  *	  					Issues:
- *	  					1) HM-133 data works, but U/D doesn't work.  Maybe the MFMIC attiny is not determining the mode correctly???
+ *	  				///	1) HM-133 data works, but U/D doesn't work.  Maybe the MFMIC attiny is not determining the mode correctly???
  *	  						Maybe process U/D messages in RDU???
  *	  				///	2) System is flaky reading the base unit status.
  *	  				///	3) Dual color (T/R) LED is not balanced.  Green is much dimmer than red (not sure the best way to fix this).  SUB RX led
@@ -878,7 +881,7 @@ char *gets_tab(char *buf, char *save_buf[], int n){
         		putsQ("");								// echo end of line to screen
     		}
     		*cp = '\0';									// terminate command line
-    		if((*buf >= ' ') && (*buf <= '~')){			// if new buf not empty (ie, 1st chr = printable),
+    		if((*buf >= ' ') && (*buf < '~')){			// if new buf not empty (ie, 1st chr = printable, but not HM preamble (~)),
     			strncpy(save_buf[rebuf_num], buf, n);	// copy new buf to save
     			if(++rebuf_num >= MAX_REBUF) rebuf_num = 0;
     		}
