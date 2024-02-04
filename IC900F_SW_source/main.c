@@ -35,6 +35,15 @@
  *
  *						!!! need to validate new freq @RF
  *
+ *	  02-03-24 jmh:		Fixed HM-133 buttons -- Was looking for null termination, but changes to how the HM data is processed leaves the data '\r'
+ *	  						terminated.
+ *	  					Hard-coded baud rate settings for SSI modules needed to be better documented.  Moved these defines to be proximate with the
+ *	  						SYSCLK defines in "init.h" and added bold note to their sensitivity.  Updated "SSICLK_calc.xls" to improve usability.
+ *	  						Need to document the spreadsheet better.
+ *	  					Added hooks to trap LOCK mode and discard any keypresses entered when LOCK active.
+ *	  					Put backlight DIM call into LCD IPL code.
+ *
+ *
  *	  01-27-24 jmh:		UP/DN button flakiness due to data loss inside the RTOS.  The band-aid fix was to provide a direct line fron the SIN capture
  *							to the is_mic_updn() function.  Also re-wrote is_mic_updn() to use a state machine.
  *

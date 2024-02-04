@@ -375,7 +375,7 @@ int x_cmdfn(U8 nargs, char* args[ARG_MAX], U16* offset){
 #endif
 
 	bchar = '\0';																// clear global escape
-	if((nargs >0) && (args[0][0] != '~')){										// process HM keys
+	if((nargs >0) && (args[0][0] == '~')){										// process HM keys
 		hm_cmd_exec(args[0], 0);
 		nargs = 0;
 	}
@@ -2181,7 +2181,7 @@ static	U8	cm_last;		// last cmd
 
 	j = (*(sptr+1) ^ *(sptr+2)) | 0x80;
 	// if command packet valid, process state machine
-	if((j == *(sptr+3)) && (*(sptr+4) == '\0')){
+	if((j == *(sptr+3)) && (*(sptr+4) == '\r')){
 //	if(*(sptr+4) == '\0'){
 		// capture command and press/hold/release status from the packet payload
 		cm = *(sptr+1);

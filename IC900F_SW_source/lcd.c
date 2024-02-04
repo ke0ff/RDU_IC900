@@ -233,13 +233,14 @@ void process_UI(U8 cmd){
 	//**************************************
 	// process IPL (Initial Program Load) init
 	if(cmd == PROC_INIT){
-		GPIO_PORTD_DATA_R |= LOCK_SELECT;
-		wait(10);
 #ifdef IC900F
 		sw_stat = 0;													// init slide switch status to off (!!!add to NVRAM to fix this later)
 #else
+		GPIO_PORTD_DATA_R |= LOCK_SELECT;
+		wait(10);
 		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);				// force update of slide switch status
 #endif
+		backl_adj(BRT_DIM);												// init dim setting
 		uimode = MAIN_MODE;												// init process variables
 		chkmode = 0;
 		vfo_display = 0;
@@ -608,6 +609,12 @@ U8 process_MS(U8 mode){
 				sub_time(1);											// reset timeout
 			}
 			i = get_key();												// pull key in from buffer space
+			// if locked, discard key (unless a lock key action)
+			if(sw_stat & LOCK){
+				if(i != LOCKDIMchr_H){
+					i = 0;												// discard keysw
+				}
+			}
 			// scan cancel
 			switch(i){													// process scan cancel key presses
 			case VFOchr:

@@ -35,6 +35,13 @@
 // Global Constants
 //-----------------------------------------------------------------------------
 
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\\
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\\
+//!!!!! read notes below carefully  !!!!!\\
+//!!!!! when making any CLK changes !!!!!\\
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\\
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\\
+
 #define SYSCLKL 10000L
 #define PIOCLK	(16000000L)			// internal osc freq (in Hz)
 #define EXTXTAL           			// un-comment if external xtal is used
@@ -54,6 +61,25 @@
 #define OSC_LF 4            				// osc clock selects
 #define OSC_HF 0
 #define OSC_EXT 1
+
+//////////////////////////////////////////////////////////////////////////////////////
+// !! these values entered manually !!
+// !! see SSICLK_calc.xls to determine minimum error values for CPSDVSR and SCR
+
+// ssi bit rate defns
+// BR = SYSCLK/(CPSR * (1 + SCR))
+// SCR = (SYSCLK/(BR * CPSR)) - 1
+// 4800 baud for SSI1
+#define	SIO_BAUD		4800L				// IC900 serial I/O baud rate
+#define	SSI1_BR			SIO_BAUD			// ssi1 clock rate (Hz)
+#define SSI1_CPSDVSR	(238)
+#define	SSI1_SCR		(69)				//((SYSCLK/(SSI1_BR * SSI1_CPSDVSR)) - 1)
+// 100K baud for SSI3
+#define	LCD_BAUD		25000L				// LCD serial I/O baud rate
+#define	SSI3_BR			LCD_BAUD			// ssi3 clock rate (Hz)
+#define SSI3_CPSDVSR	(16)
+#define	SSI3_SCR		(199)				//((SYSCLK/(SSI3_BR * SSI3_CPSDVSR)) - 1)
+//////////////////////////////////////////////////////////////////////////////////////
 
 // process_xx() defines
 #define	PROC_INIT	0xff					// IPL command for process calls
@@ -118,20 +144,6 @@
 #define	CATO_TIME		PSEC10				// CAT timeout rate
 #define	CATZ_TIME		SEC50MS				// CAT pacing timer rate
 
-// ssi bit rate defns
-// BR = SYSCLK/(CPSR * (1 + SCR))
-// SCR = (SYSCLK/(BR * CPSR)) - 1
-// see SSICLK_calc.xls for minimum error values for CPSDVSR and SCR
-// 4800 baud for SSI1
-#define	SIO_BAUD		4800L				// IC900 serial I/O baud rate
-#define	SSI1_BR			SIO_BAUD			// ssi1 clock rate (Hz)
-#define SSI1_CPSDVSR	(248)
-#define	SSI1_SCR		(41)				//((SYSCLK/(SSI1_BR * SSI1_CPSDVSR)) - 1)
-// 100K baud for SSI3
-#define	LCD_BAUD		25000L				// LCD serial I/O baud rate
-#define	SSI3_BR			LCD_BAUD			// ssi3 clock rate (Hz)
-#define SSI3_CPSDVSR	(200)
-#define	SSI3_SCR		(2)					//((SYSCLK/(SSI3_BR * SSI3_CPSDVSR)) - 1)
 
 // SIN bit time defines... assumes PS = 0 (SYSCLK/1 is used for timer)
 #define TIMER2A_PS 0
