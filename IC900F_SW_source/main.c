@@ -35,6 +35,8 @@
  *
  *						!!! need to validate new freq @RF
  *
+ *	  02-04-24 jmh:		LOCK action now includes dial and mic u/d buttons.  !!! Need to add <fn><LOCK> MFMIC command to toggle lock status.
+ *
  *	  02-03-24 jmh:		Fixed HM-133 buttons -- Was looking for null termination, but changes to how the HM data is processed leaves the data '\r'
  *	  						terminated.
  *	  					Hard-coded baud rate settings for SSI modules needed to be better documented.  Moved these defines to be proximate with the
@@ -1949,12 +1951,14 @@ void gpioc_isr(void){
 			GPIO_PORTC_IM_R = (GPIO_PORTC_IM_R & ~PORTC_DIAL) | DIAL_B;
 
 			if(!(portc_edge & DIAL_A)){						// if A-FET...
-				if(maindial & DIAL_B){						// test for direction
-					main_dial -= 2;							// do up
-				}else{
-					main_dial += 2;							// do dn
+				if(!is_lock()){
+					if(maindial & DIAL_B){					// test for direction
+						main_dial -= 2;						// do up
+					}else{
+						main_dial += 2;						// do dn
+					}
+					d_beep;									// dial beep
 				}
-				d_beep;										// dial beep
 			}
 			portc_edge = ~maindial & PORTC_DIAL;
 			break;

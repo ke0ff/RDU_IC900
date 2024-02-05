@@ -2219,6 +2219,10 @@ U32 process_DIAL(U8 focus){
 	k = get_band_index(focus);
 	// process dial
 	j = is_mic_updn(0, focus, xmodeq) + get_dial(1);
+	// lock action
+	if(sw_stat & LOCK){
+		j = 0;											// discard dial action
+	}
 	if(j){
 		if(xmodez & IPL_BOOT){
 			// cancel IPL mode
@@ -2237,7 +2241,7 @@ U32 process_DIAL(U8 focus){
 				return rflags;
 			}
 			if(focus == SUB){
-				sub_time(1);								// reset timeout
+				sub_time(1);							// reset timeout
 			}
 		}
 	}
@@ -4262,4 +4266,11 @@ U8 set_sw(U8 parm){
 	return sw_temp;
 }
 
+//-----------------------------------------------------------------------------
+// is_lock() passes LOCK state
+//-----------------------------------------------------------------------------
+U8 is_lock(void){
+
+	return(sw_stat & LOCK);
+}
 // eof

@@ -1864,6 +1864,9 @@ S8 is_mic_updn(U8 ipl, U8 focus, U8 xmq){
 		return 0;
 	}
 	j = (ud_reg & (SIN_MUP | SIN_MCK));
+	if(is_lock()){
+		j = 0;
+	}
 	switch(mstate){
 	default:
 	case MUD_IDLE:

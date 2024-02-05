@@ -295,3 +295,4 @@ U8 query_mode(void);
 void update_lcd(U8 focus, U8 forced_focus);
 void put_stat(U8 focus, char* sptr);
 U8 set_sw(U8 parm);
+U8 is_lock(void);
