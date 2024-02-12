@@ -35,6 +35,16 @@
  *
  *						!!! need to validate new freq @RF
  *
+ *    <VERSION 0.14>	***>>>   RDU/DUC Implementation - latest debug and feature fixes   <<<***
+ *	  02-11-24 jmh:		"OW" annunciator indicates status of FUNC mode (this was done way-back, but not documented).
+ *							!!! DUC SYMBOLOGY UPDATED !!! to change "OW" to inverse "FUNC"
+ *						Modified "#" DFE enter key to be dual use as CHECK function when a DFE is not in progress.
+ *						Re-mapped FUNC==off HM133 keys.  Now: 'A' = TONE, 'B' = SUB, 'C' = BAND, 'D' = SMUTE.
+ *						DFE now rounds-off to nearest 5KHz.
+ *						Bright/Dim processing improved: Now, the system remembers the last setting (bright or dim) accross power cylces.
+ *							Also, adjusting the brightness saves the setting under the current mode (bright or dim).
+ *						Fixed offset adjust rollover/under.  Now works correctly.
+ *
  *	  02-04-24 jmh:		LOCK action now includes dial and mic u/d buttons.  !!! Need to add <fn><LOCK> MFMIC command to toggle lock status.
  *
  *	  02-03-24 jmh:		Fixed HM-133 buttons -- Was looking for null termination, but changes to how the HM data is processed leaves the data '\r'
@@ -52,8 +62,8 @@
  *	  01-20-24 jmh:		Implemented bi-phase encoder wrapped in a build trap to allow compatibility with the IC900 hardware target (up/dn encoder)
  *	  						Encoder traps all edges but flip-flops active phase to skip over noise bands at leading edge of the changing phase.
  *	  						This plus an RC = 36K*1100pF of filtering means that a debounce timer is not needed.
- *	  					"Flaky comms" seems to be due to a solder bridge on a test front unit.  Comms seem to be clean based on L/A trace.
- *	  					SUB-RX LED was due to a lack of current-limit resistor.  RDU schem has the resistor, but the layout does not. UN, FORTUNATE.
+ *	  					"Flaky comms" seems to be due to a solder bridge on a test UX front unit.  Comms seem to be clean based on L/A trace.
+ *	  					SUB-RX LED fail was due to a lack of current-limit resistor.  RDU schem has the resistor, but the layout does not. UN, FORTUNATE.
  *	  						MRX/MTX LED balance will likely require two LEDs in place of the single dual-LED.  The footprint should allow for this
  *	  						with 0603 LEDs.
  *	  					Added keyscan code to accomodate the LOCK/DIM switch into the keypad mechanism (LOCKDIMchr).  NO MORE ROOM AT THE INN!!!
@@ -619,6 +629,11 @@ int main(void){
     	btredir = 0;
     	sprintf(buf,"NVsrt %0x, NVend %0x", NVRAM_BASE, MEM_END);
     	putsQ(buf);
+//   	sprintf(buf,"debug: dim %0x, brt %0x", DIMADDR, BRTADDR);
+//    	putsQ(buf);
+//    	sprintf(buf,"dimbrt: dim %0x, brt %0x, stat %0x", read_brtmem(1), read_brtmem(0), read_dstat());
+//    	putsQ(buf);
+//    	read_brtmem(1);									// init dim setting
 
     	// GPIO init
     	//...

@@ -108,6 +108,13 @@ enum vfos_enum{ vfoid, offsid, discid, lvlid };
 #define	BANK_LEN	2048
 #define	IDLE_BANK	0xff						// no bank-change signal
 #define	NVBANK_MAX	10							// max # memory banks
+
+// radio config data
+#define	CONFIG_MEM	((NVBANK_MAX * MEM_END) + 16)
+#define	BRTADDR		CONFIG_MEM
+#define	DIMADDR		(BRTADDR+1)
+#define	DIMSTATADDR	(DIMADDR+1)
+
 //#if (BANK_LEN < MEM_END)
 //#endif
 

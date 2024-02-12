@@ -2352,7 +2352,7 @@ void hm_map(U8 cm, U8 hm){
 				}
 				break;
 
-			case '\\':
+			case '\\':			// up/dn handled by A-UNIT, so ignore these keys here
 			case '/':
 				j = '\0';
 				// these keys do no-op
@@ -2394,8 +2394,9 @@ void hm_map(U8 cm, U8 hm){
 				break;
 
 
-			case SH_C:
   			case 'C':			// read PTTSUB
+  				putsQ("isC");
+			case SH_C:
   				// only act on press cmd
   				if(hm == 'p'){
   	  				// bflags hold the pttsub action status.  read the current bflags
@@ -2452,9 +2453,9 @@ void hm_map(U8 cm, U8 hm){
 			case '1':
 				if(hm == 'p'){
 					// bright
-					j = backl_adj(0xff) + 1;
-					if(j > BRT_MAX) j = BRT_MAX;
-					backl_adj(j);
+//					j = backl_adj(0xff) + 1;
+//					if(j > BRT_MAX) j = BRT_MAX;
+					backl_adj(BRT_PLUS);
 					do_1beep();
 				}
 				j = '\0';
@@ -2464,9 +2465,9 @@ void hm_map(U8 cm, U8 hm){
 			case '4':
 				if(hm == 'p'){
 					// dim
-					j = backl_adj(0xff) - 1;
-					if(j > BRT_MAX) j = 0;
-					backl_adj(j);
+//					j = backl_adj(0xff) - 1;
+//					if(j > BRT_MAX) j = 0;
+					backl_adj(BRT_MINUS);
 					do_1beep();
 				}
 				j = '\0';
@@ -2501,7 +2502,7 @@ void hm_map(U8 cm, U8 hm){
 	}else{
 		switch(cm){
 			default:
-			case '\\':
+			case '\\':			// up/dn handled by A-UNIT, so ignore these keys here
 			case '/':
 				j = '\0';
 				break;
@@ -2523,6 +2524,7 @@ void hm_map(U8 cm, U8 hm){
 				break;
 
 			case F1KEY:
+			case 'B':
 				j = SUBchr;
 				break;
 
@@ -2534,7 +2536,7 @@ void hm_map(U8 cm, U8 hm){
 				j = VFOchr;
 				break;
 
-			case 'B':
+			case 'A':
 				j = TONEchr;
 				break;
 
@@ -2552,16 +2554,20 @@ void hm_map(U8 cm, U8 hm){
 				break;
 
 			case '#':
-				j = ENTchr;
+				if(is_dfe()){
+					j = ENTchr;
+				}else{
+					j = CHKchr;
+				}
 				break;
 
 			case '*':
 				j = DOTchr;
 				break;
 
-			case 'A':
-				j = CHKchr;
-				break;
+//			case 'A':
+//				j = CHKchr;
+//				break;
 
 			case F2KEY:
 			case SH_LOKEY:

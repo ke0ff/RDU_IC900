@@ -130,7 +130,7 @@ U32	vfo_ulim[] = { 40000L, 60000L, 170000L, 228000L, 470000L, 1310000L };
 // lower frequency limits for each band
 U32	vfo_llim[] = { 27000L, 45000L, 130000L, 215000L, 420000L, 1200000L };
 // upper TX offset frequency limits for each band (lower limit is zero for all bands)
-U32	offs_ulim[] = { 13000L, 15000L, 40000L, 13000L, 50000L, 900000L };
+U32	offs_ulim[] =  { 13000L, 15000L, 40000L, 13000L, 50000L, 900000L };
 // Mem NVRAM base address table
 U32 mem_band[] = { ID10M_MEM, ID6M_MEM, ID2M_MEM, ID220_MEM, ID440_MEM, ID1200_MEM };
 //U32 mem_band[1] = { ID10M_MEM };
@@ -2031,32 +2031,36 @@ S8 add_vfo(U8 main, S8 adder, U8 daddr){
 	S32	delta;
 	U8	bbuf[7];
 
-	if(main) i = bandid_m;									// get band id for current focus
+	if(main) i = bandid_m;										// get band id for current focus
 	else i = bandid_s;
-	if(daddr & MHZ_OFFS){									// offset adjust: always uses thumbwheel mode
+	if(daddr & MHZ_OFFS){										// offset adjust: always uses thumbwheel mode
 		vfot = (U32)vfo_p[i].offs;								// copy to vfot
-		bin32_bcds(vfot, bbuf);								// convert to bcd in bbuf
-		add_bcds(bbuf, adder, daddr & MHZ_MASK, 9, 0);		// add/subtract digit
+		bin32_bcds(vfot, bbuf);									// convert to bcd in bbuf
+		add_bcds(bbuf, adder, daddr & MHZ_MASK, 9, 0);			// add/subtract digit
 		vfot = bcds_bin32(bbuf);
 		// offs rollover/under
-		if(vfot > offs_ulim[i]){
-			vfot -=  offs_ulim[i];
+		if(vfot >= offs_ulim[i]){
+			if(adder > 0){
+				vfot =  0;										// rollover
+			}else{
+				vfot =  offs_ulim[i] - 5;						// rollunder
+			}
 		}
 		vfo_p[i].offs = (U16)vfot;
 	}else{
-		if(daddr < MHZ_OFF){								// no mode flags set, this means we are in Thumbwheel mode and daddr selects the digit to be modified
-			bin32_bcds(vfot, bbuf);							// convert to BCD string (one BCD nybble per sting byte)
-			add_bcds(bbuf, adder, daddr, 9, 0);				// +/- the digit
-			vfot = bcds_bin32(bbuf);						// convert back to U32
-			if(vfot > vfo_ulim[i]){							// process band edge rollover/under
+		if(daddr < MHZ_OFF){									// no mode flags set, this means we are in Thumbwheel mode and daddr selects the digit to be modified
+			bin32_bcds(vfot, bbuf);								// convert to BCD string (one BCD nybble per sting byte)
+			add_bcds(bbuf, adder, daddr, 9, 0);					// +/- the digit
+			vfot = bcds_bin32(bbuf);							// convert back to U32
+			if(vfot > vfo_ulim[i]){								// process band edge rollover/under
 				vfot -=  vfo_ulim[i] - vfo_llim[i];
 			}
 			if(vfot < vfo_llim[i]){
 				vfot +=  vfo_ulim[i] - vfo_llim[i];
 			}
-			vfo_p[i].vfo = vfot;									// update target VFO
+			vfo_p[i].vfo = vfot;								// update target VFO
 		}else{
-			if(daddr == MHZ_OFF){							// not MHz mode, adjust using freq step (a or b) setting
+			if(daddr == MHZ_OFF){								// not MHz mode, adjust using freq step (a or b) setting
 				if(vfo_p[i].dplx & TSA_F){
 					delta = (S32)(vfo_p[i].tsb & 0x07) * 5L;
 				}else{
@@ -2064,7 +2068,7 @@ S8 add_vfo(U8 main, S8 adder, U8 daddr){
 				}
 				vfo_p[i].vfo += delta * (S32)adder;
 			}
-			if(daddr == MHZ_ONE){							// MHz mode, adjust +/- MHz increments
+			if(daddr == MHZ_ONE){								// MHz mode, adjust +/- MHz increments
 				vfo_p[i].vfo += 1000 * (S32)adder;
 			}
 			if(vfo_p[i].vfo > vfo_ulim[i]){						// same roll-over/under as above
@@ -2139,6 +2143,7 @@ void copy_vfot(U8 main){
 // copy_2vfo() stores 32b VFO to indicated vfo
 //-----------------------------------------------------------------------------
 void copy_2vfo(U8 main, U32 vfod){
+
 
     if(main == MAIN) vfo_p[bandid_m].vfo = vfod;
     else vfo_p[bandid_s].vfo = vfod;

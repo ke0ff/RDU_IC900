@@ -229,6 +229,8 @@
 #define	BRT_MAX		9
 #define	BRT_DIM		2
 #define	BRT_BRT		9
+#define	BRT_PLUS	0xf1
+#define	BRT_MINUS	0xf2
 
 //-----------------------------------------------------------------------------
 // Global Fns
@@ -296,3 +298,8 @@ void update_lcd(U8 focus, U8 forced_focus);
 void put_stat(U8 focus, char* sptr);
 U8 set_sw(U8 parm);
 U8 is_lock(void);
+U8 is_dfe(void);
+U8 read_brtmem(U8 dimode);
+void write_brtmem(U8 dimode);
+U8 read_dstat(void);
+void write_dstat(void);

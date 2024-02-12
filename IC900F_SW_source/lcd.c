@@ -107,6 +107,7 @@ char stat_str[STAT_BUF_LEN];		// status display string
 char* stat_ptr;						// status display pointer
 U8	sw_stat;						// X-sliding switches memory reg (these switches are now a single PBSW processed along with the other PBSWs)
 U8	sw_temp;						// X-sliding switches I/O memory reg
+U8	brtmem;							// LED brightness setting
 
 //-----------------------------------------------------------------------------
 // Local Fn Declarations
@@ -156,6 +157,7 @@ void set_dfe(U8 focus, U8 bandsw, U8 curband);
 void ipl_cancel(void);
 U8 switch_band(U8 focus);
 U8 process_STAT(U8 focus, U8 keychr);
+void round5(U32* value);
 
 //-----------------------------------------------------------------------------
 // init_lcd() initializes lcd resources
@@ -234,13 +236,16 @@ void process_UI(U8 cmd){
 	// process IPL (Initial Program Load) init
 	if(cmd == PROC_INIT){
 #ifdef IC900F
-		sw_stat = 0;													// init slide switch status to off (!!!add to NVRAM to fix this later)
+		sw_stat = 0;													// init slide switch status
+		read_dstat();													// pull setting from NVRAM
+		sw_temp = sw_stat;
 #else
 		GPIO_PORTD_DATA_R |= LOCK_SELECT;
 		wait(10);
 		sw_stat = ~GPIO_PORTB_DATA_R & (DIM | MISO_LOCK);				// force update of slide switch status
 #endif
-		backl_adj(BRT_DIM);												// init dim setting
+		if(sw_stat & DIM) backl_adj(BRT_DIM);							// init dim setting
+		else backl_adj(BRT_BRT);										// init brt setting
 		uimode = MAIN_MODE;												// init process variables
 		chkmode = 0;
 		vfo_display = 0;
@@ -307,15 +312,15 @@ void process_UI(U8 cmd){
 #endif
 			if(i ^ sw_stat){												// if changes..
 				if(i & DIM){
-					// process bright settings (!!! these need to be configurable in SET loop)
-					backl_adj(BRT_BRT);
-/*					set_pwm(5, 99);											// LEDs
-			        set_pwm(6, 90);											// LCDBL*/
-				}else{
 					// process DIM settings (!!! these need to be configurable in SET loop)
 					backl_adj(BRT_DIM);
 /*					set_pwm(5, 60);
 			        set_pwm(6, 30);*/
+				}else{
+					// process bright settings (!!! these need to be configurable in SET loop)
+					backl_adj(BRT_BRT);
+/*					set_pwm(5, 99);											// LEDs
+			        set_pwm(6, 90);											// LCDBL*/
 				}
 				if(i & LOCK){
 					alock(1);												// process lock mode
@@ -323,6 +328,7 @@ void process_UI(U8 cmd){
 					alock(0);												// process unlock mode
 				}
 				sw_stat = (sw_stat & ~(DIM | LOCK)) | i;					// update GPIO memory (used to trap changes)
+				write_dstat();												// store new status to NVRAM
 			}
 		}
 	}
@@ -1454,14 +1460,14 @@ U8 process_MS(U8 mode){
 				b = 1;
 				break;
 
-			case ENTchr:
+			case ENTchr:																// ENT (exit DFE mode)
 				if(band_focus){
 					mdp2_blink(0);
 				}else{
 					sdp2_blink(0);
 				}
 				if(xmodez & DFE_MODE){
-					if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ // only allow sub button if there are no errors
+					if(!(sys_err & (NO_B_PRSNT|NO_MUX_PRSNT|NO_SUX_PRSNT))){ 			// only allow sub button if there are no errors
 						j = get_modulid(dfe_vfo / 1000L);
 						if(band_focus == MAIN){
 							// process for MAIN
@@ -1724,6 +1730,7 @@ void set_dfe(U8 focus, U8 bandsw, U8 curband){
 		mema(focus, 0);						// turn off "M"
 		xmode[curband] &= ~MEM_XFLAG;
 	}
+	round5(&dfe_vfo);
 	copy_2vfo(focus, dfe_vfo);
 	write_xmode(focus);
 	update_lcd(focus, focus);
@@ -2394,7 +2401,7 @@ void freq_update(U8 focus, S8 step){
 		// MHZ (No thumbwheel) mode:
 		i = add_vfo(focus, step, maddr);					// update vfo
 		if(i && (focus == MAIN)){
-			mfreq(get_freq(MAIN), 0);					// update display
+			mfreq(get_freq(MAIN), 0);						// update display
 		}
 		if(i && (focus == SUB)){
 			sfreq(get_freq(SUB), 0);
@@ -2402,25 +2409,25 @@ void freq_update(U8 focus, S8 step){
 		vfo_change(focus);
 	}else{
 		// digit-by-digit (thumbwheel) mode
-		m = maddr & (~MHZ_OFFS);						// mask offset mode flag
-		if(m == 0) step = (step & 0x01) * 5;					// pick the odd 5KHz
+		m = maddr & (~MHZ_OFFS);							// mask offset mode flag
+		if(m == 0) step = (step & 0x01) * 5;				// pick the odd 5KHz
 		i = add_vfo(focus, step, maddr);					// update vfo
 		if(mhz_time(0)){
-			mhz_time(1);								// reset timer
+			mhz_time(1);									// reset timer
 			if(maddr & MHZ_OFFS){
 				offs_time(1);
 				mhz_time(1);
 			}
 		}
 		else{
-			mhz_time(0xff);								// exit MHz mode
+			mhz_time(0xff);									// exit MHz mode
 			offs_time(0xff);
 		}
 		if(i && (focus == MAIN)){
-			mfreq(get_vfot(), LEAD0);					// update main display
+			mfreq(get_vfot(), LEAD0);						// update main display
 		}
 		if(i && (focus == SUB)){
-			sfreq(get_vfot(), LEAD0);					// update sub display
+			sfreq(get_vfot(), LEAD0);						// update sub display
 		}
 		vfo_change(focus);
 	}
@@ -3686,6 +3693,62 @@ void read_xmode(void){
 
 ///////////////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
+// read_brtmem() reads the brtmem state from the nv memory space
+//-----------------------------------------------------------------------------
+U8 read_brtmem(U8 dimode){
+	U32	addr;		// temps
+
+	if(dimode){								// dimode = sw_temp & DIM
+		addr = nvaddr(DIMADDR, IDLE_BANK);
+	}else{
+		addr = nvaddr(BRTADDR, IDLE_BANK);
+	}
+	brtmem = rw8_nvr(addr, 0, CS_READ|CS_OPENCLOSE);
+	return brtmem;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// write_brtmem() reads the brtmem state from the nv memory space
+//-----------------------------------------------------------------------------
+void write_brtmem(U8 dimode){
+	U32	addr;		// temps
+
+	if(dimode){								// dimode = sw_temp & DIM
+		addr = nvaddr(DIMADDR, IDLE_BANK);
+	}else{
+		addr = nvaddr(BRTADDR, IDLE_BANK);
+	}
+	rw8_nvr(addr, brtmem, CS_WRITE|CS_OPENCLOSE);
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// read_dstat() reads the brtmem state from the nv memory space
+//-----------------------------------------------------------------------------
+U8 read_dstat(void){
+	U32	addr;		// temps
+
+	addr = nvaddr(DIMSTATADDR, IDLE_BANK);
+	sw_stat = (sw_stat & LOCK) | (rw8_nvr(addr, 0, CS_READ|CS_OPENCLOSE) & ~LOCK);	// ignore saved lock status
+	return sw_stat;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
+// write_dstat() reads the brtmem state from the nv memory space
+//-----------------------------------------------------------------------------
+void write_dstat(void){
+	U32	addr;		// temps
+
+	addr = nvaddr(DIMSTATADDR, IDLE_BANK);
+	rw8_nvr(addr, sw_stat, CS_WRITE|CS_OPENCLOSE);
+	return;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
 // clear_xmode() clears the xmode state to the nv memory space
 //-----------------------------------------------------------------------------
 void clear_xmode(void){
@@ -4197,19 +4260,64 @@ U8	brt_table1[] = { 10, 20, 30, 40, 50, 60, 70, 80, 90, 99 };
 U8	brt_table2[] = { 5, 15, 25, 38, 45, 50, 60, 70, 80, 90 };
 
 U8 backl_adj(U8 setv){
-	static	U8	setmem;
 
-	if(setmem > BRT_MAX){
-		setmem = BRT_DIM;
+	if(brtmem > BRT_MAX){									// failsafe
+		brtmem = BRT_DIM;
+	}
+	///////////////
+	// this section is reached from cmd_fn.c... sw_stat is assumed stable and valid here
+	if(setv == BRT_PLUS){
+		// bright+
+		brtmem += 1;
+		if(brtmem > BRT_MAX) brtmem = BRT_MAX;
+		write_brtmem(sw_stat & DIM);						// save setting
+	}
+	if(setv == BRT_MINUS){
+		// bright-
+		brtmem -= 1;
+		if(brtmem > BRT_MAX) brtmem = 0;
+		write_brtmem(sw_stat & DIM);						// save setting
+	}
+	//
+	///////////////
+//	if(sw_stat & DIM) putsQ("ddd");
+//	else putsQ("bbb");
+
+	if(setv == BRT_BRT){
+		read_brtmem(0);										// read bright setting
+//		putsQ("BRT");
+		// process bright settings
+	}
+	if(setv == BRT_DIM){
+		read_brtmem(1);										// read dim setting
+//		putsQ("dim");
+		// process bright settings
+	}
+	set_pwm(5, brt_table1[brtmem]);							// LEDs
+	set_pwm(6, brt_table2[brtmem]);							// LCDBL
+    return brtmem;
+}
+
+/*
+U8 backl_adj(U8 setv){
+	U8	i = 0;
+
+	if(brtmem > BRT_MAX){
+		brtmem = BRT_DIM;
+		i = 1;
 	}
 	if(setv <= BRT_MAX){
-		setmem = setv;
+		brtmem = setv;
+		i = 1;
 		// process bright settings
-		set_pwm(5, brt_table1[setmem]);						// LEDs
-		set_pwm(6, brt_table2[setmem]);						// LCDBL
+		set_pwm(5, brt_table1[brtmem]);						// LEDs
+		set_pwm(6, brt_table2[brtmem]);						// LCDBL
 	}
-    return setmem;
-}
+	if(i){
+		// save new setting to NVRAM
+	}
+    return brtmem;
+}*/
 
 //-----------------------------------------------------------------------------
 // xmodez_init() does IPL init of xmodez
@@ -4273,4 +4381,28 @@ U8 is_lock(void){
 
 	return(sw_stat & LOCK);
 }
+
+//-----------------------------------------------------------------------------
+// is_dfe() passes DFE state
+//-----------------------------------------------------------------------------
+U8 is_dfe(void){
+
+	return(xmodez & DFE_MODE);
+}
+
+//-----------------------------------------------------------------------------
+// round5() rounds U32 to nearest 5
+//-----------------------------------------------------------------------------
+void round5(U32* value){
+	U32	r;
+
+	r = *value % 5L;				// calc remainder of divide/5
+	if(r>2){					// adjust value to round to nearest
+		*value += 5L-r;
+	}else{
+		*value -= r;
+	}
+	return;
+}
+
 // eof
