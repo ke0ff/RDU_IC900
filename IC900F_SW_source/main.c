@@ -929,19 +929,21 @@ char process_IO(U8 flag){
 		init_lcd();
 		ptt_mode = 0xff;								// force init of ptt_mode reporting
     	swcmd = 0;										// init SW command
+		send_stat(MAIN, 'Z', btbuf);
+		process_SIN(flag);								// Process changes to SIN data state
+		process_SOUT(flag);								// Process changes to SOUT data state
+		process_UI(flag);								// Process changes to the user interface state
+		process_CMD(flag);								// process CMD_FN state (primarily, the MFmic key-entry state machine)
+		//	process_CCMD(flag);							// process CCMD inputs
+		return swcmd;
 	}
 	// perform periodic process updates					// ! SOUT init must execute before SIN init !
 	process_SIN(flag);									// Process changes to SIN data state
 	process_SOUT(flag);									// Process changes to SOUT data state
-	if(flag != PROC_INIT){
-		process_SIN(flag);								// countermeasure to increase SIN process priority
-	}
+	process_SIN(flag);									// countermeasure to increase SIN process priority
 	process_UI(flag);									// Process changes to the user interface state
 	process_CMD(flag);									// process CMD_FN state (primarily, the MFmic key-entry state machine)
 //	process_CCMD(flag);									// process CCMD inputs
-	if(flag == PROC_INIT){
-		send_stat(MAIN, 'Z', btbuf);
-	}
 	return swcmd;
 }
 

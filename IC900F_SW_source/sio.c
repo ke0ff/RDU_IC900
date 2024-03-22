@@ -281,12 +281,17 @@ void Timer2A_ISR(void)
 				sin_dr |= sin_mask;								// capture a 1
 			}
 			sin_mask >>= 1;
-			if(sin_mask == 0x2000L){
+			if(sin_mask == 0x2000L){							// data capture complete
 				i = sin_dr | 0x3fffL;							// set data for storage
 //				if(sin_buf[sin_hptrm1] != i){					// if new data is different from last word, store it
 					sin_buf[sin_hptr++] = i;
 					if(i&SIN_ADDR){
 						pass_ud(i);
+						if(i&SIN_SEND){
+							GPIO_PORTD_DATA_R &= ~sparePD4;
+						}else{
+							GPIO_PORTD_DATA_R |= sparePD4;
+						}
 					}
 /*					if((i&(SIN_ADDR|SIN_MCK|SIN_MUP))==(SIN_ADDR|SIN_MCK|SIN_MUP)){
 						putsQ("mk+");

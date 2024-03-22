@@ -230,9 +230,9 @@
 #define RAMCS_N			0x20		// out		NVRAM cs and gate for LOCK swithc
 #define CS2				0x40		// out		LCD IC2 cs		qei0A
 #define MTX_N			0x80		// out						qei0B
-#define PORTD_DIRV		(SCK|CS1|CS2|MOSI_N|RAMCS_N|MTX_N)
+#define PORTD_DIRV		(SCK|CS1|CS2|MOSI_N|RAMCS_N|MTX_N|sparePD4)
 #define	PORTD_DENV		(SCK|CS1|CS2|MOSI_N|sparePD4|RAMCS_N|MTX_N)
-#define	PORTD_PURV		(sparePD4)
+#define	PORTD_PURV		0 //(sparePD4)
 #define	PORTD_INIT		(MOSI_N|RAMCS_N)
 
 #define	RAM_SELECT		0
