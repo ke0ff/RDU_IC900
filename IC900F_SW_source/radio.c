@@ -516,6 +516,7 @@ U8 process_SOUT(U8 cmd){
 			U32* pptr;			// pointer into SOUT buffer
 //			char dgbuf[30];		// !!! debug sprintf/putsQ buffer
 
+	DIS_PROC_SOUT;									// disable ISR calling of this Fn
 	// IPL (reset) init of local statics
 	if(cmd == PROC_INIT){
 		pll_ptr = 0xff;								// set index to "idle" state

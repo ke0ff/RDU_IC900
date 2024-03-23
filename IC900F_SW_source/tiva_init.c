@@ -61,13 +61,13 @@ U16 proc_init(void){
 	GPIO_PORTB_PUR_R = PORTB_PURV;
 
 	// init LCD BUSY edge detect
-	j = GPIO_PORTE_IM_R;												// disable SIN edge intr
+	j = GPIO_PORTE_IM_R;													// disable SIN edge intr
 	GPIO_PORTE_IM_R = 0x00;
-	GPIO_PORTE_IEV_R &= ~BUSY_N;										// falling edge
-	GPIO_PORTE_IBE_R &= ~BUSY_N;										// one edge
-	GPIO_PORTE_IS_R &= ~BUSY_N;											// edge ints
-	GPIO_PORTE_ICR_R = 0xff;											// clear int flags
-	GPIO_PORTE_IM_R = j;												// re-enable SIN edge intr
+	GPIO_PORTE_IEV_R &= ~BUSY_N;											// falling edge
+	GPIO_PORTE_IBE_R &= ~BUSY_N;											// one edge
+	GPIO_PORTE_IS_R &= ~BUSY_N;												// edge ints
+	GPIO_PORTE_ICR_R = 0xff;												// clear int flags
+	GPIO_PORTE_IM_R = j;													// re-enable SIN edge intr
 
 	// init PLL
 	for(i = 0; i<10000; i++);
@@ -75,8 +75,8 @@ U16 proc_init(void){
 	ipl = IPL_PLLINIT;
 
 	// init UARTs
-	initserial();												// init UART0-1
-	NVIC_EN0_R = NVIC_EN0_UART0|NVIC_EN0_UART1;					// enable UART0 & UART1 intr
+	initserial();															// init UART0-1
+	NVIC_EN0_R = NVIC_EN0_UART0|NVIC_EN0_UART1;								// enable UART0 & UART1 intr
 	ipl |= IPL_UART0INIT;
 	ipl |= IPL_UART1INIT;
 
@@ -87,7 +87,7 @@ U16 proc_init(void){
 	ui32Loop = SYSCTL_RCGCGPIO_R;
 
 	// init Ports C - F
-	GPIO_PORTF_LOCK_R = 0x4C4F434B;										// unlock PORTF
+	GPIO_PORTF_LOCK_R = 0x4C4F434B;											// unlock PORTF
 	GPIO_PORTF_CR_R = 0xff;
 	GPIO_PORTF_DIR_R = PORTF_DIRV;
 	GPIO_PORTF_DEN_R = PORTF_DENV;
@@ -95,12 +95,12 @@ U16 proc_init(void){
 	GPIO_PORTE_DIR_R = PORTE_DIRV;
 	GPIO_PORTE_DEN_R = PORTE_DENV;
 	GPIO_PORTE_PUR_R = PORTE_PURV;
-	GPIO_PORTD_LOCK_R = 0x4C4F434B;										// unlock PORTD
+	GPIO_PORTD_LOCK_R = 0x4C4F434B;											// unlock PORTD
 	GPIO_PORTD_CR_R = 0xff;
 	GPIO_PORTD_DIR_R = PORTD_DIRV;
 	GPIO_PORTD_DEN_R = PORTD_DENV;
 	GPIO_PORTD_PUR_R = PORTD_PURV;
-	GPIO_PORTC_DIR_R &= 0x0f;											// preserve JTAG pin assignments
+	GPIO_PORTC_DIR_R &= 0x0f;												// preserve JTAG pin assignments
 	GPIO_PORTC_DEN_R &= 0x0f;
 	GPIO_PORTC_DIR_R |= (PORTC_DIRV & 0xf0);
 	GPIO_PORTC_DEN_R |= (PORTC_DENV & 0xf0);
@@ -137,67 +137,67 @@ U16 proc_init(void){
 	// init timer1A (serial pacing timer, count down, no GPIO)
 	SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;
 	ui32Loop = SYSCTL_RCGCGPIO_R;
-	TIMER1_CTL_R &= ~(TIMER_CTL_TAEN);				// disable timer
+	TIMER1_CTL_R &= ~(TIMER_CTL_TAEN);										// disable timer
 	TIMER1_CFG_R = TIMER_CFG_16_BIT; //0x4; //0;
 	TIMER1_TAMR_R = TIMER_TAMR_TAMR_PERIOD;
 	TIMER1_TAPR_R = TIMER1_PS;
 	TIMER1_TAILR_R = (uint16_t)(SYSCLK/(TIMER1_FREQ * (TIMER1_PS + 1)));
-	TIMER1_IMR_R = TIMER_IMR_TATOIM;				// enable timer intr
-//	TIMER1_CTL_R |= (TIMER_CTL_TAEN);				// enable timer
-	TIMER1_ICR_R = TIMER1_MIS_R;					// clear any flagged ints
-	NVIC_EN0_R = NVIC_EN0_TIMER1A;					// enable timer1A intr in the NVIC_EN regs
+	TIMER1_IMR_R = TIMER_IMR_TATOIM;										// enable timer intr
+//	TIMER1_CTL_R |= (TIMER_CTL_TAEN);										// enable timer
+	TIMER1_ICR_R = TIMER1_MIS_R;											// clear any flagged ints
+	NVIC_EN0_R = NVIC_EN0_TIMER1A;											// enable timer1A intr in the NVIC_EN regs
 
 	// init timer1B (bit-bang SPI, no GPIO)
 	SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;
 	ui32Loop = SYSCTL_RCGCGPIO_R;
-	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);				// disable timer
+	TIMER1_CTL_R &= ~(TIMER_CTL_TBEN);										// disable timer
 //	TIMER1_CFG_R = TIMER_CFG_16_BIT; //0x4; //0;
 	TIMER1_TBMR_R = TIMER_TBMR_TBMR_PERIOD;
 	TIMER1_TBPR_R = TIMER1B_PS;
 	TIMER1_TBILR_R = (uint16_t)(SYSCLK/(BBSPICLK_FREQ * (TIMER1B_PS + 1)));
-	TIMER1_IMR_R |= TIMER_IMR_TBTOIM;				// enable timer intr
-//	TIMER1_CTL_R |= (TIMER_CTL_TBEN);				// enable timer
-	TIMER1_ICR_R = TIMER1_MIS_R;					// clear any flagged ints
-	NVIC_EN0_R = NVIC_EN0_TIMER1B;					// enable timer1A intr in the NVIC_EN regs
+	TIMER1_IMR_R |= TIMER_IMR_TBTOIM;										// enable timer intr
+//	TIMER1_CTL_R |= (TIMER_CTL_TBEN);										// enable timer
+	TIMER1_ICR_R = TIMER1_MIS_R;											// clear any flagged ints
+	NVIC_EN0_R = NVIC_EN0_TIMER1B;											// enable timer1A intr in the NVIC_EN regs
 
 	// init Timer3A (appl timer, count down, no GPIO)
 	SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R3;
 	ui32Loop = SYSCTL_RCGCTIMER_R;
-	TIMER3_CTL_R &= ~(TIMER_CTL_TAEN);									// disable timer
+	TIMER3_CTL_R &= ~(TIMER_CTL_TAEN);										// disable timer
 	TIMER3_CFG_R = TIMER_CFG_16_BIT;
 	TIMER3_TAMR_R = TIMER_TAMR_TAMR_PERIOD;
-	TIMER3_TAPR_R = (uint16_t)(TIMER3_PS - 1);							// prescale reg = divide ratio - 1
+	TIMER3_TAPR_R = (uint16_t)(TIMER3_PS - 1);								// prescale reg = divide ratio - 1
 	TIMER3_TAILR_R = (uint16_t)(SYSCLK/(1000L * TIMER3_PS));
-	TIMER3_IMR_R = TIMER_IMR_TATOIM;									// enable timer intr
-	TIMER3_CTL_R |= (TIMER_CTL_TAEN);									// enable timer
+	TIMER3_IMR_R = TIMER_IMR_TATOIM;										// enable timer intr
+	TIMER3_CTL_R |= (TIMER_CTL_TAEN);										// enable timer
 	TIMER3_ICR_R = TIMER3_MIS_R;
-	NVIC_EN1_R = NVIC_EN1_TIMER3A;										// enable timer intr in the NVIC
+	NVIC_EN1_R = NVIC_EN1_TIMER3A;											// enable timer intr in the NVIC
 	ipl |= IPL_TIMER_ALL_INIT;
 
 	// init LED PWMs on PF2 & PF3	(commented out unused PWMs... PF1-3, PE4-5 are all the PWMs supported here)
 	SYSCTL_RCGCPWM_R |= SYSCTL_RCGCPWM_R1;
-	ui32Loop = SYSCTL_RCGCPWM_R;										// delay a few cycles
+	ui32Loop = SYSCTL_RCGCPWM_R;											// delay a few cycles
 	SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R5;
-	ui32Loop = SYSCTL_RCGCGPIO_R;										// delay a few cycles
-	GPIO_PORTF_AFSEL_R |= BL_PWM|LED_PWM;								// enable alt fn, PF1-2
+	ui32Loop = SYSCTL_RCGCGPIO_R;											// delay a few cycles
+	GPIO_PORTF_AFSEL_R |= BL_PWM|LED_PWM;									// enable alt fn, PF1-2
 	GPIO_PORTF_PCTL_R &= ~(GPIO_PCTL_PF2_M|GPIO_PCTL_PF3_M);
 	GPIO_PORTF_PCTL_R |= (GPIO_PCTL_PF2_M1PWM6|GPIO_PCTL_PF3_M1PWM7);
 	SYSCTL_RCC_R = (SYSCTL_RCC_R & ~SYSCTL_RCC_PWMDIV_M) | (PWM_DIV << 17) | SYSCTL_RCC_USEPWMDIV;
 //	PWM1_1_CTL_R = 0;
-//	PWM1_1_GENA_R = PWM_1_GENA_ACTCMPAD_ZERO|PWM_1_GENA_ACTLOAD_ONE;	// M1PWM2
-//	PWM1_1_GENB_R = PWM_1_GENB_ACTCMPBD_ZERO|PWM_1_GENB_ACTLOAD_ONE;	// M1PWM3
+//	PWM1_1_GENA_R = PWM_1_GENA_ACTCMPAD_ZERO|PWM_1_GENA_ACTLOAD_ONE;		// M1PWM2
+//	PWM1_1_GENB_R = PWM_1_GENB_ACTCMPBD_ZERO|PWM_1_GENB_ACTLOAD_ONE;		// M1PWM3
 //	PWM1_1_LOAD_R = PWM_ZERO;
 //	PWM1_1_CMPA_R = PWM_ZERO - 1;
 //	PWM1_1_CMPB_R = PWM_ZERO - 1;
 //	PWM1_2_CTL_R = 0;
-//	PWM1_2_GENA_R = PWM_2_GENA_ACTCMPAD_ZERO|PWM_2_GENA_ACTLOAD_ONE;	// M1PWM4
-//	PWM1_2_GENB_R = PWM_2_GENB_ACTCMPBD_ZERO|PWM_2_GENB_ACTLOAD_ONE;	// M1PWM5
+//	PWM1_2_GENA_R = PWM_2_GENA_ACTCMPAD_ZERO|PWM_2_GENA_ACTLOAD_ONE;		// M1PWM4
+//	PWM1_2_GENB_R = PWM_2_GENB_ACTCMPBD_ZERO|PWM_2_GENB_ACTLOAD_ONE;		// M1PWM5
 //	PWM1_2_LOAD_R = PWM_ZERO;
 //	PWM1_2_CMPA_R = PWM_ZERO - 1;
 //	PWM1_2_CMPB_R = PWM_ZERO - 1;
 	PWM1_3_CTL_R = 0;
-	PWM1_3_GENA_R = PWM_3_GENA_ACTCMPAD_ZERO|PWM_3_GENA_ACTLOAD_ONE;	// M1PWM6
-	PWM1_3_GENB_R = PWM_3_GENB_ACTCMPBD_ZERO|PWM_3_GENB_ACTLOAD_ONE;	// M1PWM7
+	PWM1_3_GENA_R = PWM_3_GENA_ACTCMPAD_ZERO|PWM_3_GENA_ACTLOAD_ONE;		// M1PWM6
+	PWM1_3_GENB_R = PWM_3_GENB_ACTCMPBD_ZERO|PWM_3_GENB_ACTLOAD_ONE;		// M1PWM7
 	PWM1_3_LOAD_R = PWM_ZERO;
 	PWM1_3_CMPA_R = PWM_ZERO - 1;
 	PWM1_3_CMPB_R = PWM_ZERO - 1;
@@ -212,15 +212,15 @@ U16 proc_init(void){
 	ipl |= IPL_ADC0INIT;
 
 	// init QEI
-/*	SYSCTL_RCGCQEI_R = SYSCTL_RCGCQEI_R1|SYSCTL_RCGCQEI_R0;			// enable clock to qei1/0
-	GPIO_PORTC_AFSEL_R |= ENC1A|ENC1B;					// enable alt fn
-	GPIO_PORTD_AFSEL_R |= ENC0A|ENC0B;					// enable alt fn
-	GPIO_PORTC_PCTL_R &= ~(GPIO_PCTL_PC6_M|GPIO_PCTL_PC5_M);							// PB4 = port pin for IC
+/*	SYSCTL_RCGCQEI_R = SYSCTL_RCGCQEI_R1|SYSCTL_RCGCQEI_R0;					// enable clock to qei1/0
+	GPIO_PORTC_AFSEL_R |= ENC1A|ENC1B;										// enable alt fn
+	GPIO_PORTD_AFSEL_R |= ENC0A|ENC0B;										// enable alt fn
+	GPIO_PORTC_PCTL_R &= ~(GPIO_PCTL_PC6_M|GPIO_PCTL_PC5_M);				// PB4 = port pin for IC
 	GPIO_PORTC_PCTL_R |= (GPIO_PCTL_PC6_PHB1|GPIO_PCTL_PC5_PHA1);
-	GPIO_PORTD_PCTL_R &= ~(GPIO_PCTL_PD7_M|GPIO_PCTL_PD6_M);							// PB4 = port pin for IC
+	GPIO_PORTD_PCTL_R &= ~(GPIO_PCTL_PD7_M|GPIO_PCTL_PD6_M);				// PB4 = port pin for IC
 	GPIO_PORTD_PCTL_R |= (GPIO_PCTL_PD7_PHB0|GPIO_PCTL_PD6_PHA0);
-	QEI0_CTL_R = QEI_CTL_RESMODE|QEI_CTL_CAPMODE;				// cap mode = both edges, 0 = pha only
-	QEI0_POS_R = 0x8000;							// 0x8000 = 0, 0x8001 = +1, 0x7fff = -1, ...
+	QEI0_CTL_R = QEI_CTL_RESMODE|QEI_CTL_CAPMODE;							// cap mode = both edges, 0 = pha only
+	QEI0_POS_R = 0x8000;													// 0x8000 = 0, 0x8001 = +1, 0x7fff = -1, ...
 	QEI0_MAXPOS_R = 0x0000ffff;
 	QEI1_CTL_R = QEI_CTL_RESMODE|QEI_CTL_CAPMODE;
 	QEI1_POS_R = 0x8000;
@@ -230,36 +230,52 @@ U16 proc_init(void){
 //	read position:
 //	x = QEI0_POS_R;
 //	rot dir:
-//	dir = QEI0_STAT_R | QEI_STAT_DIRECTION; // 0 = fwd, 1 = reverse
+//	dir = QEI0_STAT_R | QEI_STAT_DIRECTION; 								// 0 = fwd, 1 = reverse
 //	dir = QEI0_STAT_R | QEI_STAT_ERROR; // 0 = OK, 1 = error in gray code
 */
 //	encoder_init();
 #ifdef	IC900
 	// DIAL up/dn enc. config
-	j = GPIO_PORTC_IM_R & (~PORTC_DIAL);								// disable edge intr
+	j = GPIO_PORTC_IM_R & (~PORTC_DIAL);									// disable edge intr
 	GPIO_PORTC_IM_R = 0;
-	GPIO_PORTC_IEV_R &= ~PORTC_DIAL;									// falling edge
-	GPIO_PORTC_IBE_R &= ~PORTC_DIAL;									// one edge
-	GPIO_PORTC_IS_R = ~PORTC_DIAL;										// edge ints
-	GPIO_PORTC_ICR_R = 0xff;											// clear int flags
-	j |= PORTC_DIAL;													// enable dial edge intr
+	GPIO_PORTC_IEV_R &= ~PORTC_DIAL;										// falling edge
+	GPIO_PORTC_IBE_R &= ~PORTC_DIAL;										// one edge
+	GPIO_PORTC_IS_R = ~PORTC_DIAL;											// edge ints
+	GPIO_PORTC_ICR_R = 0xff;												// clear int flags
+	j |= PORTC_DIAL;														// enable dial edge intr
 	GPIO_PORTC_IM_R = j;
-	NVIC_EN0_R = NVIC_EN0_GPIOC;										// enable GPIOC intr in the NVIC_EN regs
+	NVIC_EN0_R = NVIC_EN0_GPIOC;											// enable GPIOC intr in the NVIC_EN regs
 #endif
 #ifdef	IC900F
 	// DIAL A/B enc. config
-	j = GPIO_PORTC_IM_R & (~PORTC_DIAL);								// disable edge intr
+	j = GPIO_PORTC_IM_R & (~PORTC_DIAL);									// disable edge intr
 	GPIO_PORTC_IM_R = 0;
-//	GPIO_PORTC_IEV_R &= ~PORTC_DIAL;									// falling edge
-//	GPIO_PORTC_IBE_R &= ~PORTC_DIAL;									// one edge
+//	GPIO_PORTC_IEV_R &= ~PORTC_DIAL;										// falling edge
+//	GPIO_PORTC_IBE_R &= ~PORTC_DIAL;										// one edge
 
-	GPIO_PORTC_IBE_R |= PORTC_DIAL;										// both edges
-	GPIO_PORTC_IS_R = ~PORTC_DIAL;										// edge ints
-	GPIO_PORTC_ICR_R = 0xff;											// clear int flags
-	j |= DIAL_A;														// enable dial_a edge intr (only one at a time)
+	GPIO_PORTC_IBE_R |= PORTC_DIAL;											// both edges
+	GPIO_PORTC_IS_R = ~PORTC_DIAL;											// edge ints
+	GPIO_PORTC_ICR_R = 0xff;												// clear int flags
+	j |= DIAL_A;															// enable dial_a edge intr (only one at a time)
 	GPIO_PORTC_IM_R = j;
-	NVIC_EN0_R = NVIC_EN0_GPIOC;										// enable GPIOC intr in the NVIC_EN regs
+	NVIC_EN0_R = NVIC_EN0_GPIOC;											// enable GPIOC intr in the NVIC_EN regs
 #endif
+
+	// init timer2B (process_sout driver, no GPIO)
+	// NOTE: This timer leave its interrupt flags set always and thus becomes a SW triggered interrupt by
+	//	enabling it in the NVIC_EN register.  The ISR disables itself so that only one instance executes
+	//	per trigger event.
+	SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R2;
+	ui32Loop = SYSCTL_RCGCGPIO_R;
+	TIMER2_CTL_R &= ~(TIMER_CTL_TBEN);										// disable timer
+//	TIMER2_CFG_R = TIMER_CFG_16_BIT; //0x4; //0;
+	TIMER2_TBMR_R = TIMER_TBMR_TBMR_PERIOD;
+	TIMER2_TBPR_R = TIMER2B_PS;
+	TIMER2_TBILR_R = (uint16_t)(SYSCLK/(T2B_FREQ * (TIMER2B_PS + 1)));
+	TIMER2_IMR_R |= TIMER_IMR_TBTOIM;										// enable timer intr
+//	TIMER2_CTL_R |= (TIMER_CTL_TBEN);										// enable timer
+	TIMER2_ICR_R = TIMER2_MIS_R;											// clear any flagged ints
+
 	// set isr prio rankings
 	//	This is an effort to smooth out data flows by assigning preemptive priorities to critical ISR resources.
 	//	The lower-prio number ISRs have higher priority and can preempt a currently pending ISR (allowing the

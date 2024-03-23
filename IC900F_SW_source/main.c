@@ -36,7 +36,11 @@
  *						!!! need to validate new freq @RF
  *
  *    <VERSION 0.14>	***>>>   RDU/DUC Implementation - latest debug and feature fixes   <<<***
- *    02-22-24 jmh:		Start of provisions to improve ISR dataflows.  Implemented priority-preemption to allow higher-prio ISRs to "interrupt"
+ *    03-23-24 jmh:		STEP 1 complete.
+ *    					STEP 2, phase 1 is ready for test.  This mechanizes process_sout as an ISR driven by timer2b.  Only one trigger is
+ *    						currently in place.  Thus, the execution should be as for STEP 1: no change to previous behavior.  Phase 2 will
+ *    						add more triggers (at least on inside the SIN ISR) to see if PTT improvement can be observed.
+ *    03-22-24 jmh:		Start of provisions to improve ISR dataflows.  Implemented priority-preemption to allow higher-prio ISRs to "interrupt"
  *    						lower-prio ISRs.  This is leading up to a proposed change to make process_SOUT() be an ISR Fn that is triggered by one
  *    						of several sources (one being PROCESS_IO).  process_SOUT() shall be implemented as Timer2B.  It will be triggered by
  *    						enabling the NVIC interrupt and it shall self-disable at the end of a single pass.  The timer2B ISR will never clear
@@ -939,17 +943,18 @@ char process_IO(U8 flag){
 		ptt_mode = 0xff;								// force init of ptt_mode reporting
     	swcmd = 0;										// init SW command
 		send_stat(MAIN, 'Z', btbuf);
-		process_SIN(flag);								// Process changes to SIN data state
-		process_SOUT(flag);								// Process changes to SOUT data state
-		process_UI(flag);								// Process changes to the user interface state
-		process_CMD(flag);								// process CMD_FN state (primarily, the MFmic key-entry state machine)
-		//	process_CCMD(flag);							// process CCMD inputs
+		process_SIN(flag);								// init SIN data state
+		process_SOUT(flag);								// init SOUT data state
+		process_UI(flag);								// init the user interface state
+		process_CMD(flag);								// init process CMD_FN state (primarily, the MFmic key-entry state machine)
+		//	process_CCMD(flag);							// init process CCMD inputs
 		return swcmd;
 	}
 	// perform periodic process updates					// ! SOUT init must execute before SIN init !
 	process_SIN(flag);									// Process changes to SIN data state
-	process_SOUT(flag);									// Process changes to SOUT data state
-	process_SIN(flag);									// countermeasure to increase SIN process priority
+//	process_SOUT(flag);									// Process changes to SOUT data state
+	EN_PROC_SOUT;										// Process changes to SOUT data state
+//	process_SIN(flag);									// countermeasure to increase SIN process priority
 	process_UI(flag);									// Process changes to the user interface state
 	process_CMD(flag);									// process CMD_FN state (primarily, the MFmic key-entry state machine)
 //	process_CCMD(flag);									// process CCMD inputs

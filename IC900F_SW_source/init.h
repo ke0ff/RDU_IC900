@@ -31,6 +31,17 @@
 //#define	LA_ENABLE					// define if logic analyzer is enabled (debug)	//
 //////////////////////////////////////////////////////////////////////////////////////////
 
+//// Global Macros ///////////////////////////////////////////////////////////////////////
+//
+// process_sout enable
+#define	EN_PROC_SOUT	NVIC_EN0_R = NVIC_EN0_TIMER2B
+
+// process_sout disable
+#define	DIS_PROC_SOUT	NVIC_DIS0_R = NVIC_EN0_TIMER2B
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
+
 //-----------------------------------------------------------------------------
 // Global Constants
 //-----------------------------------------------------------------------------
@@ -161,6 +172,9 @@
 
 #define TIMER1B_PS 		1			// prescale value for timer1B
 #define	BBSPICLK_FREQ	600000L		// edge freq for BB SPI clk
+
+#define TIMER2B_PS 		1			// prescale value for timer2B
+#define	T2B_FREQ		1000L		// edge freq for timer2B
 
 #define	TPULSE	(100L)				// in usec
 #define TMIN	(((SYSCLK / 100) * TPULSE)/10000L)	// minimum pulse width
