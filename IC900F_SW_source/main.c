@@ -36,7 +36,16 @@
  *						!!! need to validate new freq @RF
  *
  *    <VERSION 0.14>	***>>>   RDU/DUC Implementation - latest debug and feature fixes   <<<***
- *	  02-11-24 jmh:		"OW" annunciator indicates status of FUNC mode (this was done way-back, but not documented).
+ *    02-22-24 jmh:		Start of provisions to improve ISR dataflows.  Implemented priority-preemption to allow higher-prio ISRs to "interrupt"
+ *    						lower-prio ISRs.  This is leading up to a proposed change to make process_SOUT() be an ISR Fn that is triggered by one
+ *    						of several sources (one being PROCESS_IO).  process_SOUT() shall be implemented as Timer2B.  It will be triggered by
+ *    						enabling the NVIC interrupt and it shall self-disable at the end of a single pass.  The timer2B ISR will never clear
+ *    						the timer flag, thus making it effectively a SW-triggered ISR.  Trigger shall be implemented as a Macro to reduce
+ *    						call/ret overhead.
+ *    						STEP 1: Ensure that the SW runs "normally" with just the changes to the priority system
+ *    						STEP 2: Implement process_SOUT as Timer2B, and place triggers in Process_IO() and SIN-traps for PTT changes.
+ *    						STEP 3: Make sure the system still works AND that the PTT timing is improved.
+ *	  02-11-24 jmh:		"OW" annunciator indicates status of HM-133 FUNC mode (this was done way-back, but not documented).
  *							!!! DUC SYMBOLOGY UPDATED !!! to change "OW" to inverse "FUNC"
  *						Modified "#" DFE enter key to be dual use as CHECK function when a DFE is not in progress.
  *						Re-mapped FUNC==off HM133 keys.  Now: 'A' = TONE, 'B' = SUB, 'C' = BAND, 'D' = SMUTE.
