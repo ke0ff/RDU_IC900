@@ -41,6 +41,7 @@ U8	sin_tptr;
 #define	SIN_MAX	10
 U32	sin_buf[SIN_MAX];
 U32	sin_dr;
+U32 pttm;			// ptt edge mem
 
 //-----------------------------------------------------------------------------
 // ***** START OF CODE *****
@@ -63,6 +64,7 @@ U32 init_sio(void)
 	sin_hptr = 0;
 	sin_tptr = 0;
 	sin_buf[sin_hptr] = 0;
+	pttm = 0xff;
 
 	// init ssi1 (4800 baud, 32b, async serial out)
 	// with 32 bits (2, 16bit values written into the FIFO one after the other), the SO bitmap is as follows
@@ -257,7 +259,8 @@ void gpiof_isr(void){
 
 void Timer2A_ISR(void)
 {
-	U32	i;		// temp
+	U32	i;		// temps
+	U32	j;
 
 	if(sin_hptr >= SIN_MAX){									// failsafe countermeasure
 		sin_hptr = 0;
@@ -284,15 +287,23 @@ void Timer2A_ISR(void)
 			if(sin_mask == 0x2000L){							// data capture complete
 				i = sin_dr | 0x3fffL;							// set data for storage
 //				if(sin_buf[sin_hptrm1] != i){					// if new data is different from last word, store it
-					sin_buf[sin_hptr++] = i;
 					if(i&SIN_ADDR){
 						pass_ud(i);
-						if(i&SIN_SEND){
-							GPIO_PORTD_DATA_R &= ~sparePD4;
-						}else{
-							GPIO_PORTD_DATA_R |= sparePD4;
+						j = i&SIN_SEND;
+						sin_buf[sin_hptr++] = i & ~(SIN_SEND|SIN_MUP|SIN_MCK);
+						if(j != pttm){
+							pttm = j;
+							EN_PROC_SOUT;						// Process changes to SOUT data state
+							if(j){ //!!!
+								GPIO_PORTD_DATA_R &= ~sparePD4;
+							}else{
+								GPIO_PORTD_DATA_R |= sparePD4;
+							}
 						}
+					}else{
+						sin_buf[sin_hptr++] = i;
 					}
+
 /*					if((i&(SIN_ADDR|SIN_MCK|SIN_MUP))==(SIN_ADDR|SIN_MCK|SIN_MUP)){
 						putsQ("mk+");
 					}

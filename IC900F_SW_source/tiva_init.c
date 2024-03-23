@@ -273,7 +273,7 @@ U16 proc_init(void){
 	TIMER2_TBPR_R = TIMER2B_PS;
 	TIMER2_TBILR_R = (uint16_t)(SYSCLK/(T2B_FREQ * (TIMER2B_PS + 1)));
 	TIMER2_IMR_R |= TIMER_IMR_TBTOIM;										// enable timer intr
-//	TIMER2_CTL_R |= (TIMER_CTL_TBEN);										// enable timer
+	TIMER2_CTL_R |= (TIMER_CTL_TBEN);										// enable timer
 	TIMER2_ICR_R = TIMER2_MIS_R;											// clear any flagged ints
 
 	// set isr prio rankings

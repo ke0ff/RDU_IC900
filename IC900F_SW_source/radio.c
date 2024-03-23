@@ -445,7 +445,6 @@ void process_SIN(U8 cmd){
 		sin_flags = 0;
 		lerr = 10L;
 		init_radio();									// init radio and data structures
-		ptt_mem = 0x10L;
 		xmodez_init();
 		return;
 	}													// normal (run) branch
@@ -516,7 +515,6 @@ U8 process_SOUT(U8 cmd){
 			U32* pptr;			// pointer into SOUT buffer
 //			char dgbuf[30];		// !!! debug sprintf/putsQ buffer
 
-	DIS_PROC_SOUT;									// disable ISR calling of this Fn
 	// IPL (reset) init of local statics
 	if(cmd == PROC_INIT){
 		pll_ptr = 0xff;								// set index to "idle" state
@@ -528,6 +526,7 @@ U8 process_SOUT(U8 cmd){
 		last_svol = 0xff;
 		last_ssqu = 0xff;
 		mute_time(0xff);
+		ptt_mem = 0xff;
 //		sout_flags = 0;
 		return 0;
 	}
@@ -550,7 +549,7 @@ U8 process_SOUT(U8 cmd){
 			k = 0xff;																// processing...
 		}
 		if(!j){
-			ii = sin_addr1 & SIN_SEND;
+			ii = ud_reg & SIN_SEND;													// grab raw ptt
 			if(ii != ptt_mem) {														// PTT change detected
 				ptt_mem = ii;														// save change
 				if(ii){
@@ -587,7 +586,7 @@ U8 process_SOUT(U8 cmd){
 					}
 					switch(i){														// this will mechanize the various updates to process in order without collision
 					case SOUT_VFOM_N:
-						if(sin_addr1 & SIN_SEND) i = 1;								// get current state of PTT
+						if(ud_reg & SIN_SEND) i = 1;								// get current state of PTT
 						else i = 0;
 						pptr = setpll(bandid_m, pll_buf, i, MAIN);					// update main pll
 						pll_ptr = 0;
@@ -714,6 +713,9 @@ U8 process_SOUT(U8 cmd){
 				pll_ptr = 0xff;														// set end of tx flag
 			}
 		}
+	}
+	if(!k){
+		DIS_PROC_SOUT;																// disable ISR if no process in works
 	}
 	return k;
 }
@@ -2814,7 +2816,7 @@ U8 get_cos(void){
 	ii = sin_addr0 & (SIN_SQSA|SIN_SQSB);					// isolate main and sub SRF
 	ii >>= SIN_SQSB_bp;
 	i = (U8)ii;
-	ii = (sin_addr1 & SIN_SEND) >> (SIN_SEND_bp - 2);		// place PTT at b2
+	ii = (ud_reg & SIN_SEND) >> (SIN_SEND_bp - 2);			// place PTT at b2
 	i |= (U8)ii;
 	return i;
 }

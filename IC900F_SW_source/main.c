@@ -36,6 +36,14 @@
  *						!!! need to validate new freq @RF
  *
  *    <VERSION 0.14>	***>>>   RDU/DUC Implementation - latest debug and feature fixes   <<<***
+ *    03-23-24 jmh:		STEP 2 complete. Implemented phase 2 and got fast data-link between SIN and SOUT mechanized using prioritized
+ *    						ISRs and making Timer2B the "SW" triggered process_SOUT path.  This is now working with PTT-to-first-SOUT
+ *    						delays of less than 10ms (was almost 700ms, max).
+ *    						process_SOUT() is still a callable function, but it is only called directly to perform IPL init and to detect
+ *    						installed modules during the IPL init phase.  Otherwise, process_SOUT() is invoked by the "EN_PROC_SOUT;"
+ *    						macro which simply enables Timer2B in the NVIC (the Timer2B ISR calls process_SOUT(0)).
+ *    					SIN now screens out MUP/MCK/SEND bits from the buffered data.  Resources that depend on these signals must obtain
+ *    						them from the ud_reg located in radio.c
  *    03-23-24 jmh:		STEP 1 complete.
  *    					STEP 2, phase 1 is ready for test.  This mechanizes process_sout as an ISR driven by timer2b.  Only one trigger is
  *    						currently in place.  Thus, the execution should be as for STEP 1: no change to previous behavior.  Phase 2 will
