@@ -281,6 +281,9 @@ U16 proc_init(void){
 	//	The lower-prio number ISRs have higher priority and can preempt a currently pending ISR (allowing the
 	//	lower-prio ISR to be "interrupted" in favor of the hight prio ISR).
 	//	!! Note: This depends on the default grouping providing 8 levels of preemption. !!
+	// The default grouping seems to work as this lash-up was tested by placing a GPIO toggle in a high-prio ISR and then
+	//	placing a "while(1)" in a lower-prio ISR.  The GPIO continued to toggle when the "while(1)" was encountered
+	//	confirming that the lower-prio ISR was being successfully preempted. -jmh 03-23-24
 	// The syntax is:
 	// {reg_name}{_R} = {prio_name} << {reg_name}{periph_name}
 	//	one must look up the {reg_name} in the processor defines file, tm4c123gh6pm.h

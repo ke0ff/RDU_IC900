@@ -15,12 +15,19 @@
  *  !! The TI datasheet lies !! UART: configuring 2 stop bits requires 2 stop bits for RX also
  *
  *    				 To-do Checklist time!
- *    				 !!! there is a noticeable lag in the PTT now (maybe???).  Need to find a way to instrument the DUT to quantify the issue !!!
  *    				 !!! Need to come up with a re-start sequence without power cycling if the BERR is resolved.
  *    				 !!! mem scan needs to disable string disp mode...
  *    				 * VFO Scan mode
  *    				 * XIT/RIT adjust (perhaps use VFOchr_H ???)
  *					 !!! mutetimer (mute_time()) never gets set, only read.  !?!?!
+ *					 3/23/24
+ *					 !!! DU not clearing blink memory when RDU does a reset cycle... need to assert reset to the DU (PB7)
+ *					 !!! LCD needs to periodically update all DU sectors
+ *					 !!! Tone set needs to send tone to base unit as it is adjusted (perhaps with a short delay during changes)
+ *					 !!! IPL needs to properly vacate missing modules when powered on with a new configuration
+ *					 !!! need to validate new freq @RF
+ *					 !!! PTTsub mode not saving
+ *					 !!! 1296: tone freq mode not clearing GHZ digit
  *
  *    Project scope rev History:
  *   					***>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>.<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<***
@@ -29,11 +36,9 @@
  *   					***>>>   coding elements that apply to the new hardware paradigm   <<<***
  *   					***>>>   so that the Mark-I RDU can still be loaded with this      <<<***
  *   					***>>>   source database.                                          <<<***
+ *   					***>>>   MOD'd: main.c, init.h, cmd_fn.c/h, serial.c/h, lcd.c/h,   <<<***
+ *   					***>>>     radio.c/h, version.h                                    <<<***
  *   					***>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>.<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<***
- *
- *    MOD'd: main.c, init.h, cmd_fn.c/h, serial.c/h, lcd.c/h, radio.c/h, version.h
- *
- *						!!! need to validate new freq @RF
  *
  *    <VERSION 0.14>	***>>>   RDU/DUC Implementation - latest debug and feature fixes   <<<***
  *    03-23-24 jmh:		STEP 2 complete. Implemented phase 2 and got fast data-link between SIN and SOUT mechanized using prioritized
