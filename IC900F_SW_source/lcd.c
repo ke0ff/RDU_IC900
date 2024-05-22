@@ -661,7 +661,7 @@ U8 process_MS(U8 mode){
 			}
 			i = test_for_cancel(i);										// check to see if keycode qualifies for "cancel" (substitutes "cancel" key in place of the actual key)
 			b = 1;
-			// ============ start of key parsing switch
+			// ============ start of key-input parsing switch
 			switch(i){													// dispatch to key-specific code segments...
 
 			case SETchr_H:
@@ -672,7 +672,10 @@ U8 process_MS(U8 mode){
 	  			// bflags hold the pttsub action status.  read the current bflags
 	  			//	and advance the status
 	  			i = nvbank_nxt(0);
-				if(b!=3) b = 1;
+/*				if(b!=3){
+					// save VFOs
+
+				}*/
 	  			// display status
 	  			switch(i){
 	  			case 0:
@@ -716,6 +719,7 @@ U8 process_MS(U8 mode){
 					break;
 
 	 			default:
+		  			i = nvbank_nxt(0xff);
 	  				put_stat(MAIN, "BANK ERROR");
 	  				b = 4;
 	 				break;
@@ -1457,7 +1461,7 @@ U8 process_MS(U8 mode){
   					b = 4;
  					break;
  				}
-				b = 1;
+//				b = 1;
 				break;
 
 			case ENTchr:																// ENT (exit DFE mode)
@@ -1869,7 +1873,8 @@ void process_VFODISP(U8 focus){
 						i = 1;										// error trap
 					}
 					ii = tone_list[i - 1];							// tone list is "0" origin, tones values are "1" origin
-					sprintf(tbuf,"%4d  ", ii);						// convert number to display string
+					sprintf(tbuf," %4d  ", ii);						// convert number to display string
+					sm6(0);
 					puts_lcd(focus, tbuf, 1);
 					vfo_display &= ~VMODE_TDISP;					// clear update trigger
 					force_push();									// force update to NVRAM
@@ -2953,7 +2958,7 @@ U8	mputs_lcd(char *s, U8 dp_tf){
 	while(*s && (i < 7)){
 		lcd_buf[i--] = asc27(*s++);
 	}
-	put_spi(lcd_mraw, CS_OPEN);							// init for raw seg data
+	put_spi(lcd_mraw, CS_OPEN);									// init for raw seg data
 	put_spi(lcd_buf, CS_CLOSE); //put_spi(lcd_buf, CS_IDLE);
 	if(dp_tf) mdp(1); //put_spi(lcd_mfreq_2, CS_CLOSE);			// DP
 	else mdp(0); //put_spi(lcd_mfreq_3, CS_CLOSE);				// no DP

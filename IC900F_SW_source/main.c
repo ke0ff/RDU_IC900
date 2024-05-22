@@ -14,7 +14,7 @@
  *  Project scope rev notes:
  *  !! The TI datasheet lies !! UART: configuring 2 stop bits requires 2 stop bits for RX also
  *
- *    				 To-do Checklist time!
+ *    				 To-do Checklist time! ([*fnDVT*] = Fixed, needs DVT)
  *    				 !!! Need to come up with a re-start sequence without power cycling if the BERR is resolved.
  *    				 !!! mem scan needs to disable string disp mode...
  *    				 * VFO Scan mode
@@ -27,7 +27,7 @@
  *					 !!! IPL needs to properly vacate missing modules when powered on with a new configuration
  *					 !!! need to validate new freq @RF
  *					 !!! PTTsub mode not saving
- *					 !!! 1296: tone freq mode not clearing GHZ digit
+ *				*	 !!! [*fnDVT*] 1296: tone freq mode not clearing GHZ digit
  *
  *    Project scope rev History:
  *   					***>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>.<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<***
@@ -40,7 +40,12 @@
  *   					***>>>     radio.c/h, version.h                                    <<<***
  *   					***>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>.<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<***
  *
- *    <VERSION 0.14>	***>>>   RDU/DUC Implementation - latest debug and feature fixes   <<<***
+ *    <VERSION 0.15>	***>>>   RDU/DUC Implementation - latest debug and feature fixes   <<<***
+ *    05-19-24 jmh:		CTCSS set mode now clears GHz digit - expect the freq set code to re-establish once the CTCSS display expires.
+ *    					radio.c: nvbank_nxt() now has an init mode (param == 0xff).  Calling origin uses this to re-init nvbank if it is out of range.
+ *    					*** need to figure out when/where to save vfo meta-data (such as bflags).
+ *
+ *    <VERSION 0.14>
  *    03-23-24 jmh:		STEP 2 complete. Implemented phase 2 and got fast data-link between SIN and SOUT mechanized using prioritized
  *    						ISRs and making Timer2B the "SW" triggered process_SOUT path.  This is now working with PTT-to-first-SOUT
  *    						delays of less than 10ms (was almost 700ms, max).

@@ -13,6 +13,7 @@
 
 /********************************************************************
  *  File scope declarations revision history:
+ *    03-23-24 jmh:  0.14 IC900F initial field beta
  *    07-06-22 jmh:  0.12 MFmic support release
  *    04-09-16 jmh:  0.1 First field release
  *    07-30-14 jmh:  0.0 creation date
@@ -20,8 +21,8 @@
  *******************************************************************/
 
 #ifdef VERSOURCE
-const S8    version_number[] = {"0.14"};
-const S8    date_code[]      = {"23-Mar-2024"};
+const S8    version_number[] = {"0.15"};
+const S8    date_code[]      = {"19-May-2024"};
 #endif
 
 //-----------------------------------------------------------------------------

@@ -505,6 +505,7 @@ U8 process_SOUT(U8 cmd){
 			U8	i;				// temp
 			U8	j;
 			U8	k = 0;
+			U8	v = 0;			// vfo changed flag, set if anything inside a VFO struct gets changed
 	static	U8	xit_count;		// used to mechanize UX-129 XIT/RIT adjustment sequences
 	static	U8	xit_dir;
 	static	U8	last_mvol;
@@ -812,11 +813,13 @@ U32  nvaddr(U32 addrin, U8 cmd){
 
 //-----------------------------------------------------------------------------
 // nvbank_nxt() calculates next bank setting it tf is true.  Returns current setting
+//	if tf == 0xff, initialize nvbank to 0
 //-----------------------------------------------------------------------------
 U8 nvbank_nxt(U8 tf){
 
 	if(tf){
-		nvbank += 1;
+		if(tf == 0xff) nvbank = 0;
+		else nvbank += 1;
 		if(nvbank >= NVBANK_MAX) nvbank = 0;
 		eearray[0] = (eearray[0] & 0xffffff00) | nvbank;
 		save_ee(0);
@@ -851,6 +854,7 @@ U8  get_bflag(U8 focus, U8 cmd, U8 bfset){
 	else i = bandid_s;
 	if(cmd){
 		vfo_p[i].bflags = bfset;
+		vfo_change = 1;
 	}
 	return vfo_p[i].bflags;
 }
